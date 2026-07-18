@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+tavily-python
+elevenlabs
+twilio
+openai
+pydantic-settings
+python-multipart
+tzdata
