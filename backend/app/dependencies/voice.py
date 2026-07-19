@@ -5,11 +5,12 @@ from typing import Any, Protocol
 
 from app.clients.eleven_client import ElevenLabsClient, ElevenLabsWebhookVerifier
 from app.config import settings
+from app.database import upsert_completed_call
 from app.models.job_spec import JobSpec
 from app.models.lead import Lead
 from app.models.quote import Fee, Quote
 from app.models.voice import P3QuoteInput, StoredCallArtifact
-from app.store import call_artifacts, job_specs, leads, processed_webhook_events, quotes
+from app.store import call_artifacts, call_states, job_specs, leads, processed_webhook_events, quotes
 
 
 class VoiceRepository(Protocol):
@@ -122,6 +123,25 @@ class StoreCompletedCallSink:
                 break
         else:
             existing.append(quote)
+
+        artifact = self._repository.get_artifact(quote_input.call_id)
+        upsert_completed_call(
+            job_spec_id=job_spec_id,
+            quote_input=quote_input,
+            company_name=company_name,
+            company_phone=company.phone_number if company else None,
+            artifact=artifact,
+        )
+
+        state = "completed" if quote.outcome == "quote" else quote.outcome
+        call_states.setdefault(job_spec_id, {})[quote.company_id] = {
+            **call_states.setdefault(job_spec_id, {}).get(quote.company_id, {}),
+            "state": state,
+            "outcome": quote.outcome,
+            "call_id": quote.call_id,
+            "transcript_url": quote.transcript_url,
+            "recording_url": quote.recording_url,
+        }
 
         from app.api.results import broadcast_report_update
 

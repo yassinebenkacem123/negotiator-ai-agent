@@ -34,6 +34,7 @@ class RankedCompany(BaseModel):
     company_id: str
     company: str
     total: float
+    final_price: float
     fees: List[Fee] = []
     differentiators: List[str] = []
     red_flag: Optional[str] = None

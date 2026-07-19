@@ -1,5 +1,13 @@
-// Mock/real API module. Switching backends only requires editing these two constants:
-export const API_BASE_URL = "http://127.0.0.1:8000/api";
+// Mock/real API module. Switching backends only requires editing VITE_API_BASE_URL.
+const DEFAULT_BACKEND_BASE_URL = "https://5a0b-160-178-38-22.ngrok-free.app";
+const configuredBackendBaseUrl =
+  import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_BACKEND_BASE_URL;
+export const BACKEND_BASE_URL = configuredBackendBaseUrl.replace(/\/+$/, "");
+export const API_BASE_URL = BACKEND_BASE_URL.endsWith("/api")
+  ? BACKEND_BASE_URL
+  : `${BACKEND_BASE_URL}/api`;
+const API_HEADERS = { "ngrok-skip-browser-warning": "true" };
+const JSON_HEADERS = { ...API_HEADERS, "Content-Type": "application/json" };
 const USE_MOCK = false;
 
 const NETWORK_DELAY_MS = 800;
@@ -27,9 +35,10 @@ export type JobSpec = {
   date_flexible: boolean;
   num_trips: number;
   num_bags: number;
-  notes: string;
+  notes: string | null;
   source: Source;
   distance_miles: number | null;
+  confirmed_by_user: boolean;
   intake_transcript?: string | null;
 };
 
@@ -38,15 +47,21 @@ export type Fee = { label: string; amount: number };
 export type Quote = {
   company_id: string;
   company: string;
-  total: number;
+  call_id?: string;
+  initial_price?: number | null;
+  negotiated_price?: number | null;
+  negotiation_successful?: boolean;
+  total: number | null;
+  final_price?: number | null;
   fees: Fee[];
   differentiators: string[];
+  outcome?: string;
   red_flag: string | null;
-  transcript_url: string;
-  recording_url: string;
+  transcript_url: string | null;
+  recording_url: string | null;
 };
 
-export type RankedCompany = Quote & { rank: number; recommended: boolean };
+export type RankedCompany = Omit<Quote, "total"> & { total: number; final_price?: number; rank: number; recommended: boolean };
 
 export type Report = {
   job_spec_id: string;
@@ -54,7 +69,106 @@ export type Report = {
   ranked_companies: RankedCompany[];
 };
 
-export type CreateSpecInput = Omit<JobSpec, "job_spec_id" | "distance_miles">;
+export type CreateSpecInput = Omit<JobSpec, "job_spec_id" | "distance_miles" | "confirmed_by_user"> &
+  Partial<Pick<JobSpec, "confirmed_by_user">>;
+export type DraftSpecInput = Omit<CreateSpecInput, "origin_lat" | "origin_lng" | "destination_lat" | "destination_lng"> &
+  Partial<Pick<CreateSpecInput, "origin_lat" | "origin_lng" | "destination_lat" | "destination_lng">>;
+
+export type Lead = {
+  company_id: string;
+  name: string;
+  phone_number: string | null;
+  address: string | null;
+  email: string | null;
+  website: string | null;
+  working_hours: Record<string, string>;
+  source_url: string | null;
+  city: string;
+};
+
+export type DiscoveryResult = {
+  job_spec_id: string;
+  leads: Lead[];
+};
+
+export type StartNegotiatingResult = {
+  job_spec_id: string;
+  results: Array<{
+    company_id: string;
+    status: string;
+    call_sid?: string;
+  }>;
+};
+
+export type CallStatus = {
+  company_id: string;
+  company_name: string;
+  phone_number: string | null;
+  state: string;
+  started_at: string | null;
+  call_duration_seconds: number | null;
+  outcome: string | null;
+  failure_message: string | null;
+  call_id: string | null;
+  call_sid: string | null;
+  transcript_url: string | null;
+  recording_url: string | null;
+};
+
+export type StoredCall = {
+  id: number;
+  call_id: string;
+  conversation_id: string;
+  job_spec_id: string;
+  company_id: string;
+  company_name: string;
+  company_phone: string | null;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  transcript: Array<{ role: string; message?: string | null; time_in_call_secs?: number | null }>;
+  transcript_url: string | null;
+  recording_url: string | null;
+  initial_price: number | null;
+  negotiated_price: number | null;
+  negotiation_successful: boolean;
+  fees: Record<string, number | string | boolean | null>;
+  differentiators: string[];
+  outcome: string | null;
+  red_flag: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StartTestOutboundResult = {
+  job_spec_id: string;
+  status: string;
+  call_sid: string;
+  company: Lead;
+  prepared_call: {
+    agent_id: string;
+    job_spec_id: string;
+    company_id: string;
+    company_name: string;
+    to_number: string;
+    dynamic_variables: Record<string, string>;
+  };
+};
+
+export type CallsResult = {
+  calls: StoredCall[];
+};
+
+export type CallStatusesResult = {
+  job_spec_id: string;
+  calls: CallStatus[];
+};
+
+export function reportWebSocketUrl(id: string) {
+  const wsBase = BACKEND_BASE_URL.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+  return `${wsBase}/api/results/ws/${encodeURIComponent(id)}`;
+}
 
 // ---------- API entrypoints (the only mock/real branching) ----------
 export async function createSpec(input: CreateSpecInput): Promise<JobSpec> {
@@ -62,7 +176,7 @@ export async function createSpec(input: CreateSpecInput): Promise<JobSpec> {
 
   const res = await fetch(`${API_BASE_URL}/specs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS,
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(`createSpec failed: ${res.status}`);
@@ -72,17 +186,19 @@ export async function createSpec(input: CreateSpecInput): Promise<JobSpec> {
 export async function getSpec(id: string): Promise<JobSpec> {
   if (USE_MOCK) return mockGetSpec(id);
 
-  const res = await fetch(`${API_BASE_URL}/specs/${encodeURIComponent(id)}`);
+  const res = await fetch(`${API_BASE_URL}/specs/${encodeURIComponent(id)}`, {
+    headers: API_HEADERS,
+  });
   if (!res.ok) throw new Error(`getSpec failed: ${res.status}`);
   return res.json();
 }
 
-export async function updateSpec(id: string, spec: JobSpec): Promise<JobSpec> {
+export async function updateSpec(id: string, spec: CreateSpecInput): Promise<JobSpec> {
   if (USE_MOCK) return mockUpdateSpec(id, spec);
 
   const res = await fetch(`${API_BASE_URL}/specs/${encodeURIComponent(id)}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS,
     body: JSON.stringify(spec),
   });
   if (!res.ok) throw new Error(`updateSpec failed: ${res.status}`);
@@ -94,7 +210,7 @@ export async function createSpecFromVoice(transcript: string): Promise<JobSpec> 
 
   const res = await fetch(`${API_BASE_URL}/specs/from-voice`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: JSON_HEADERS,
     body: JSON.stringify({ transcript }),
   });
   if (!res.ok) throw new Error(`createSpecFromVoice failed: ${res.status}`);
@@ -106,7 +222,11 @@ export async function createSpecFromDocument(file: File): Promise<JobSpec> {
 
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/specs/from-document`, { method: "POST", body: formData });
+  const res = await fetch(`${API_BASE_URL}/specs/from-document`, {
+    method: "POST",
+    headers: API_HEADERS,
+    body: formData,
+  });
   if (!res.ok) throw new Error(`createSpecFromDocument failed: ${res.status}`);
   return res.json();
 }
@@ -118,7 +238,7 @@ export async function enrichSpecFromDocument(id: string, file: File): Promise<Jo
   formData.append("file", file);
   const res = await fetch(
     `${API_BASE_URL}/specs/${encodeURIComponent(id)}/enrich-from-document`,
-    { method: "POST", body: formData },
+    { method: "POST", headers: API_HEADERS, body: formData },
   );
   if (!res.ok) throw new Error(`enrichSpecFromDocument failed: ${res.status}`);
   return res.json();
@@ -129,16 +249,48 @@ export async function confirmSpec(id: string): Promise<JobSpec> {
 
   const res = await fetch(
     `${API_BASE_URL}/specs/${encodeURIComponent(id)}/confirm`,
-    { method: "POST" },
+    { method: "POST", headers: API_HEADERS },
   );
   if (!res.ok) throw new Error(`confirmSpec failed: ${res.status}`);
+  return res.json();
+}
+
+export async function findMovers(id: string): Promise<DiscoveryResult> {
+  const res = await fetch(
+    `${API_BASE_URL}/search/find-movers/${encodeURIComponent(id)}`,
+    { method: "POST", headers: API_HEADERS },
+  );
+  if (!res.ok) throw new Error(`findMovers failed: ${res.status}`);
+  return res.json();
+}
+
+export async function startNegotiating(id: string): Promise<StartNegotiatingResult> {
+  const res = await fetch(
+    `${API_BASE_URL}/calls/start-negotiating/${encodeURIComponent(id)}?stream_webhook_base_url=${encodeURIComponent(BACKEND_BASE_URL)}`,
+    { method: "POST", headers: API_HEADERS },
+  );
+  if (!res.ok) throw new Error(`startNegotiating failed: ${res.status}`);
+  return res.json();
+}
+
+export async function startTestOutbound(id: string): Promise<StartTestOutboundResult> {
+  const res = await fetch(
+    `${API_BASE_URL}/calls/start-test/${encodeURIComponent(id)}`,
+    { method: "POST", headers: API_HEADERS },
+  );
+  if (!res.ok) {
+    const payload = await res.json().catch(() => null);
+    throw new Error(payload?.detail || `startTestOutbound failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export async function getResults(id: string): Promise<Report> {
   if (USE_MOCK) return mockGetResults(id);
 
-  const res = await fetch(`${API_BASE_URL}/results/${encodeURIComponent(id)}`);
+  const res = await fetch(`${API_BASE_URL}/results/${encodeURIComponent(id)}`, {
+    headers: API_HEADERS,
+  });
   if (!res.ok) throw new Error(`getResults failed: ${res.status}`);
   return res.json();
 }
@@ -148,9 +300,41 @@ export async function getCompletedCall(id: string, companyId: string): Promise<Q
 
   const res = await fetch(
     `${API_BASE_URL}/calls/completed/${encodeURIComponent(id)}/${encodeURIComponent(companyId)}`,
-    { method: "POST" },
+    { method: "POST", headers: API_HEADERS },
   );
   if (!res.ok) throw new Error(`getCompletedCall failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getCallStatuses(id: string): Promise<CallStatusesResult> {
+  const res = await fetch(`${API_BASE_URL}/calls/status/${encodeURIComponent(id)}`, {
+    headers: API_HEADERS,
+  });
+  if (!res.ok) throw new Error(`getCallStatuses failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getCalls(filters: {
+  job_spec_id?: string;
+  company_id?: string;
+  status?: string;
+  outcome?: string;
+} = {}): Promise<CallsResult> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE_URL}/calls${suffix}`, { headers: API_HEADERS });
+  if (!res.ok) throw new Error(`getCalls failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getCall(callId: string): Promise<StoredCall> {
+  const res = await fetch(`${API_BASE_URL}/calls/${encodeURIComponent(callId)}`, {
+    headers: API_HEADERS,
+  });
+  if (!res.ok) throw new Error(`getCall failed: ${res.status}`);
   return res.json();
 }
 
@@ -162,29 +346,18 @@ function genId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const R = 3958.8;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return Math.round(2 * R * Math.asin(Math.sqrt(a)));
-}
-
 async function mockCreateSpec(input: CreateSpecInput): Promise<JobSpec> {
   await delay(NETWORK_DELAY_MS);
   const job_spec_id = genId("spec");
-  const spec: JobSpec = { ...input, job_spec_id, distance_miles: null };
+  const spec: JobSpec = { ...input, job_spec_id, distance_miles: null, confirmed_by_user: false };
   specStore.set(job_spec_id, spec);
   specCreatedAt.set(job_spec_id, Date.now());
   return spec;
 }
 
-async function mockUpdateSpec(id: string, spec: JobSpec): Promise<JobSpec> {
+async function mockUpdateSpec(id: string, spec: CreateSpecInput): Promise<JobSpec> {
   await delay(NETWORK_DELAY_MS);
-  const updated = { ...spec, job_spec_id: id };
+  const updated = { ...spec, job_spec_id: id, distance_miles: null, confirmed_by_user: false };
   specStore.set(id, updated);
   return updated;
 }
@@ -211,6 +384,7 @@ async function mockCreateSpecFromVoice(transcript: string): Promise<JobSpec> {
     notes: "",
     source: "voice_interview",
     distance_miles: null,
+    confirmed_by_user: false,
     intake_transcript: transcript,
   };
   specStore.set(job_spec_id, spec);
@@ -240,6 +414,7 @@ async function mockCreateSpecFromDocument(): Promise<JobSpec> {
     notes: "",
     source: "document_upload",
     distance_miles: null,
+    confirmed_by_user: false,
   };
   specStore.set(job_spec_id, spec);
   specCreatedAt.set(job_spec_id, Date.now());
@@ -251,24 +426,7 @@ async function mockGetSpec(id: string): Promise<JobSpec> {
   const spec = specStore.get(id);
   if (!spec) throw new Error(`Spec ${id} not found`);
   const createdAt = specCreatedAt.get(id) ?? 0;
-  if (spec.distance_miles == null && Date.now() - createdAt >= DISTANCE_DELAY_MS) {
-    const hasCoords =
-      spec.origin_lat != null &&
-      spec.origin_lng != null &&
-      spec.destination_lat != null &&
-      spec.destination_lng != null;
-    const miles = hasCoords
-      ? haversineMiles(
-          spec.origin_lat as number,
-          spec.origin_lng as number,
-          spec.destination_lat as number,
-          spec.destination_lng as number,
-        ) || 45
-      : 45;
-    const updated = { ...spec, distance_miles: miles };
-    specStore.set(id, updated);
-    return updated;
-  }
+  if (spec.distance_miles == null && Date.now() - createdAt >= DISTANCE_DELAY_MS) return spec;
   return spec;
 }
 
@@ -276,22 +434,7 @@ async function mockConfirmSpec(id: string): Promise<JobSpec> {
   await delay(NETWORK_DELAY_MS);
   const spec = specStore.get(id);
   if (!spec) throw new Error(`Spec ${id} not found`);
-  const hasCoords =
-    spec.origin_lat != null &&
-    spec.origin_lng != null &&
-    spec.destination_lat != null &&
-    spec.destination_lng != null;
-  const miles =
-    spec.distance_miles ??
-    (hasCoords
-      ? haversineMiles(
-          spec.origin_lat as number,
-          spec.origin_lng as number,
-          spec.destination_lat as number,
-          spec.destination_lng as number,
-        ) || 45
-      : 45);
-  const updated = { ...spec, distance_miles: miles };
+  const updated = { ...spec, confirmed_by_user: true };
   specStore.set(id, updated);
   return updated;
 }

@@ -19,9 +19,18 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     tavily_api_key: str = ""
     elevenlabs_api_key: str = ""
+    elevenlabs_intake_agent_id: str = ""
     elevenlabs_caller_agent_id: str = ""
+    elevenlabs_test_company_id: str = "test_moving_company"
+    elevenlabs_test_company_name: str = "Test Moving Company"
+    elevenlabs_test_company_phone: str = "+212610833077"
     elevenlabs_webhook_secret: str = ""
-    backend_public_url: str = "http://localhost:8000"
+    backend_public_url: str = "https://5a0b-160-178-38-22.ngrok-free.app"
+    frontend_cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:8080,http://127.0.0.1:8080"
+    )
+    database_url: str = "sqlite:///./data/negotiator.db"
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = Field(

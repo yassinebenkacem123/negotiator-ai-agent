@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { useRef, useState } from "react";
 import { Mic, FileUp, CheckCircle2, Loader2 } from "lucide-react";
-import { createSpecFromVoice, enrichSpecFromDocument, updateSpec, confirmSpec, type JobSpec } from "@/lib/api";
+import { createSpecFromVoice, enrichSpecFromDocument, updateSpec, confirmSpec, findMovers, type JobSpec } from "@/lib/api";
 
 export const Route = createFileRoute("/voice")({
   head: () => ({
@@ -30,6 +30,7 @@ function VoicePage() {
   const [error, setError] = useState<string | null>(null);
   const [enriching, setEnriching] = useState(false);
   const [documentAdded, setDocumentAdded] = useState(false);
+  const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof JobSpec>(k: K, v: JobSpec[K]) =>
@@ -72,6 +73,12 @@ function VoicePage() {
     try {
       await updateSpec(spec.job_spec_id, spec);
       const confirmed = await confirmSpec(spec.job_spec_id);
+      try {
+        const discovery = await findMovers(spec.job_spec_id);
+        setDiscoveryStatus(`Found ${discovery.leads.length} movers near your origin.`);
+      } catch (err) {
+        setDiscoveryStatus(err instanceof Error ? err.message : "Mover discovery failed.");
+      }
       setSpec(confirmed);
       setStep("confirmed");
     } catch (err) {
@@ -244,7 +251,7 @@ function VoicePage() {
                 onClick={onConfirm}
                 className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
               >
-                Confirm spec & start calling movers
+                Confirm spec & find movers
               </button>
             </div>
           </motion.div>
@@ -267,9 +274,10 @@ function VoicePage() {
             </motion.div>
             <h1 className="mt-4 text-2xl font-bold text-foreground">Spec confirmed</h1>
             <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              The Negotiator will start calling movers now. Job ID:{" "}
+              The Negotiator has your confirmed spec. Job ID:{" "}
               <span className="font-mono">{spec.job_spec_id}</span>
             </p>
+            {discoveryStatus && <p className="mt-2 text-sm text-muted-foreground">{discoveryStatus}</p>}
             <div className="mt-6 flex gap-3">
               <Link to="/calls" className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
                 Watch live calls

@@ -9,23 +9,38 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
 from app.api import calls, results, search, specs
+from app.config import settings
+from app.database import initialize_database
 from app.services.stream_handler import handle_media_stream
 
 app = FastAPI(title="The Negotiator — Residential Moving Backend")
 
-# Dev-friendly wildcard: the frontend runs on a different port during local
-# testing. Tighten this to a specific origin before any real deployment.
+cors_origins = [
+    origin.strip()
+    for origin in settings.frontend_cors_origins.split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Content-Type",
+        "ngrok-skip-browser-warning",
+    ],
 )
 
 app.include_router(specs.router)
 app.include_router(search.router)
 app.include_router(calls.router)
 app.include_router(results.router)
+
+
+@app.on_event("startup")
+def startup() -> None:
+    initialize_database()
 
 
 # ---------------------------------------------------------------------------

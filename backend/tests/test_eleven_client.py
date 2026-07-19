@@ -1,5 +1,6 @@
 import httpx
 import pytest
+import json
 
 from app.clients.eleven_client import (
     ElevenLabsAuthenticationError,
@@ -33,6 +34,28 @@ async def test_get_conversation_sends_api_key_and_returns_payload() -> None:
 
     client = make_client(handler)
     assert (await client.get_conversation("conv_123"))["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_register_twilio_call_sends_agent_and_dynamic_variables() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/convai/twilio/register-call"
+        payload = json.loads(request.content)
+        assert payload["agent_id"] == "agent_123"
+        assert payload["from_number"] == "+14145550100"
+        assert payload["to_number"] == "+212610833077"
+        assert payload["direction"] == "outbound"
+        assert payload["conversation_initiation_client_data"]["dynamic_variables"]["job_spec_id"] == "spec_123"
+        return httpx.Response(200, text="<Response><Connect /></Response>")
+
+    client = make_client(handler)
+    twiml = await client.register_twilio_call(
+        agent_id="agent_123",
+        from_number="+14145550100",
+        to_number="+212610833077",
+        dynamic_variables={"job_spec_id": "spec_123"},
+    )
+    assert twiml.startswith("<Response>")
 
 
 @pytest.mark.asyncio

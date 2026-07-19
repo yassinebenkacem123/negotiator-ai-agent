@@ -101,6 +101,47 @@ class ElevenLabsClient:
             )
         return payload
 
+    async def register_twilio_call(
+        self,
+        *,
+        agent_id: str,
+        from_number: str,
+        to_number: str,
+        dynamic_variables: dict[str, str],
+    ) -> str:
+        """Register an existing outbound Twilio call with an ElevenLabs agent."""
+
+        if not agent_id:
+            raise ElevenLabsConfigurationError(
+                "ELEVENLABS_CALLER_AGENT_ID is required"
+            )
+        if not from_number:
+            raise ElevenLabsConfigurationError("TWILIO_FROM_NUMBER is required")
+        try:
+            response = await self._client.post(
+                "/v1/convai/twilio/register-call",
+                headers={**self._headers(), "Content-Type": "application/json"},
+                json={
+                    "agent_id": agent_id,
+                    "from_number": from_number,
+                    "to_number": to_number,
+                    "direction": "outbound",
+                    "conversation_initiation_client_data": {
+                        "dynamic_variables": dynamic_variables,
+                    },
+                },
+            )
+        except httpx.TimeoutException as exc:
+            raise ElevenLabsTimeoutError("ElevenLabs request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise ElevenLabsUpstreamError("ElevenLabs request failed") from exc
+        self._raise_for_status(response)
+        if not response.text.strip():
+            raise ElevenLabsMalformedResponseError(
+                "ElevenLabs returned empty TwiML"
+            )
+        return response.text
+
     async def get_conversation_audio(
         self, conversation_id: str
     ) -> AsyncIterator[bytes]:

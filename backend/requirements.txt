@@ -13,4 +13,4 @@ pytest-asyncio
 tzdata
 websockets
 numpy
-audioop-lts
+audioop-lts; python_version >= "3.13"

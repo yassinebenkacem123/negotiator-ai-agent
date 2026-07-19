@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
-import { createElement, lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { createSpec, getSpec, confirmSpec } from "@/lib/api";
+import { createElement, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { createSpec, getSpec, updateSpec, confirmSpec, startTestOutbound, type DraftSpecInput, type JobSpec } from "@/lib/api";
 
 const ELEVENLABS_SCRIPT_SRC = "https://elevenlabs.io/convai-widget/index.js";
-const ELEVENLABS_AGENT_ID = "agent_1301kxwfxc93e9nsct5kdekedv8x";
+const ELEVENLABS_INTAKE_AGENT_ID =
+  import.meta.env.VITE_ELEVENLABS_INTAKE_AGENT_ID?.trim() || "agent_1301kxwfxc93e9nsct5kdekedv8x";
 
 const LeafletMap = lazy(() => import("@/components/LeafletMap"));
 
@@ -39,6 +40,19 @@ type Spec = {
   notes: string;
   source: Source;
 };
+
+type SubmitStatus = "idle" | "creating" | "confirming";
+
+function friendlyError(message: string) {
+  if (message.includes("Failed to fetch") || message.includes("NetworkError")) {
+    return "Could not reach the backend. Check that ngrok is running and the frontend API URL is current.";
+  }
+  if (message.includes("422")) return "Some required move details are missing or invalid. Please review the form.";
+  if (message.includes("400")) return "The backend rejected this step. Please review the draft before confirming.";
+  if (message.includes("404")) return "The saved draft could not be found. Please create the draft again.";
+  if (message.includes("503")) return "A required service is not configured yet.";
+  return "Something went wrong. Please try again.";
+}
 
 const initialSpec: Spec = {
   origin_address: "1425 Elm Street, Apt 4B, Brooklyn, NY 11201",
@@ -113,7 +127,11 @@ function ConfirmPage() {
   const [spec, setSpec] = useState<Spec>(initialSpec);
   const [mode, setMode] = useState<"voice" | "manual">("voice");
   const [confirmed, setConfirmed] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
+  const widgetHostRef = useRef<HTMLDivElement>(null);
+  const submitting = submitStatus !== "idle";
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -128,6 +146,98 @@ function ConfirmPage() {
   const [distanceUnavailable, setDistanceUnavailable] = useState(false);
 
   const set = <K extends keyof Spec>(k: K, v: Spec[K]) => setSpec((s) => ({ ...s, [k]: v }));
+
+  const loadCreatedJobSpec = useCallback((created: JobSpec) => {
+    setSpec({
+      origin_address: created.origin_address,
+      origin_floor: created.origin_floor,
+      origin_has_elevator: created.origin_has_elevator,
+      origin_lat: created.origin_lat,
+      origin_lng: created.origin_lng,
+      destination_address: created.destination_address,
+      destination_floor: created.destination_floor,
+      destination_has_elevator: created.destination_has_elevator,
+      destination_lat: created.destination_lat,
+      destination_lng: created.destination_lng,
+      move_date: created.move_date,
+      date_flexible: created.date_flexible,
+      num_trips: created.num_trips,
+      num_bags: created.num_bags,
+      notes: created.notes ?? "",
+      source: created.source,
+    });
+    setJobSpecId(created.job_spec_id);
+    setDistanceMiles(created.distance_miles);
+    setConfirmed(created.confirmed_by_user);
+    setError(null);
+    setDiscoveryStatus(null);
+    setMode("manual");
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("negotiator.job_spec_id", created.job_spec_id);
+    }
+  }, []);
+
+  const normalizeVoiceSpec = useCallback((payload: Partial<DraftSpecInput>): DraftSpecInput => ({
+    origin_address: payload.origin_address ?? "",
+    origin_floor: Number(payload.origin_floor ?? 0),
+    origin_has_elevator: Boolean(payload.origin_has_elevator),
+    origin_lat: payload.origin_lat ?? null,
+    origin_lng: payload.origin_lng ?? null,
+    destination_address: payload.destination_address ?? "",
+    destination_floor: Number(payload.destination_floor ?? 0),
+    destination_has_elevator: Boolean(payload.destination_has_elevator),
+    destination_lat: payload.destination_lat ?? null,
+    destination_lng: payload.destination_lng ?? null,
+    move_date: payload.move_date ?? "",
+    date_flexible: Boolean(payload.date_flexible),
+    num_trips: Number(payload.num_trips ?? 1),
+    num_bags: Number(payload.num_bags ?? 0),
+    notes: payload.notes ?? "",
+    source: "voice_interview",
+    confirmed_by_user: false,
+  }), []);
+
+  const createDraft = useCallback(async (draft: DraftSpecInput) => {
+    setSubmitStatus("creating");
+    setError(null);
+    setDistanceUnavailable(false);
+    try {
+      const created = await createSpec({ ...draft, confirmed_by_user: false });
+      loadCreatedJobSpec(created);
+      return {
+        ok: true,
+        job_spec_id: created.job_spec_id,
+        job_spec: created,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not create the job spec.";
+      setError(friendlyError(message));
+      return { ok: false, error: friendlyError(message) };
+    } finally {
+      setSubmitStatus("idle");
+    }
+  }, [loadCreatedJobSpec]);
+
+  useEffect(() => {
+    if (mode !== "voice") return;
+    const widget = widgetHostRef.current?.querySelector("elevenlabs-convai");
+    if (!widget) return;
+
+    const onCall = (event: Event) => {
+      const customEvent = event as CustomEvent<{ config?: { clientTools?: Record<string, unknown> } }>;
+      if (!customEvent.detail) return;
+      const config = customEvent.detail.config ?? {};
+      config.clientTools = {
+        ...(config.clientTools ?? {}),
+        submit_job_spec: (payload: Partial<DraftSpecInput>) => createDraft(normalizeVoiceSpec(payload)),
+        save_job_spec: (payload: Partial<DraftSpecInput>) => createDraft(normalizeVoiceSpec(payload)),
+      };
+      customEvent.detail.config = config;
+    };
+
+    widget.addEventListener("elevenlabs-convai:call", onCall);
+    return () => widget.removeEventListener("elevenlabs-convai:call", onCall);
+  }, [createDraft, mode, normalizeVoiceSpec]);
 
   const onPinChange = useCallback(async (kind: PinKind, lat: number, lng: number) => {
     console.log("[geocode] pin dragged", { kind, lat, lng });
@@ -190,32 +300,39 @@ function ConfirmPage() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-    setDistanceMiles(null);
-    setDistanceUnavailable(false);
-    try {
-      console.log("[submit] POST /api/specs body", {
-        origin_lat: spec.origin_lat,
-        origin_lng: spec.origin_lng,
-        destination_lat: spec.destination_lat,
-        destination_lng: spec.destination_lng,
-        full: spec,
-      });
-      const submitSpec: Spec = {
+    if (submitting) return;
+    if (!jobSpecId) {
+      await createDraft({
         ...spec,
         source: mode === "voice" ? "voice_interview" : "document_upload",
-      };
-      const created = await createSpec(submitSpec);
-      setJobSpecId(created.job_spec_id);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("negotiator.job_spec_id", created.job_spec_id);
+        confirmed_by_user: false,
+      });
+      return;
+    }
+
+    setSubmitStatus("confirming");
+    setError(null);
+    try {
+      const updated = await updateSpec(jobSpecId, {
+        ...spec,
+        confirmed_by_user: false,
+      });
+      const confirmedSpec = await confirmSpec(updated.job_spec_id);
+      loadCreatedJobSpec(confirmedSpec);
+      try {
+        const started = await startTestOutbound(confirmedSpec.job_spec_id);
+        setDiscoveryStatus(
+          `Started the test call to ${started.company.name} (${started.company.phone_number}).`,
+        );
+      } catch (err) {
+        setDiscoveryStatus(
+          friendlyError(err instanceof Error ? err.message : "The test outbound call could not be started."),
+        );
       }
-      const confirmed = await confirmSpec(created.job_spec_id);
-      setDistanceMiles(confirmed.distance_miles);
-      setConfirmed(true);
-      console.log("Confirm Spec response:", confirmed);
+    } catch (err) {
+      setError(friendlyError(err instanceof Error ? err.message : "Could not confirm the job spec."));
     } finally {
-      setSubmitting(false);
+      setSubmitStatus("idle");
     }
   };
 
@@ -258,18 +375,10 @@ function ConfirmPage() {
       <div className="mb-6 inline-flex rounded-md border border-border bg-card p-1">
         <button
           type="button"
-          onClick={() => setMode("voice")}
-          className={`px-4 py-2 text-sm font-medium rounded ${
-            mode === "voice"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Talk to our assistant
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("manual")}
+          onClick={() => {
+            setMode("manual");
+            set("source", "document_upload");
+          }}
           className={`px-4 py-2 text-sm font-medium rounded ${
             mode === "manual"
               ? "bg-primary text-primary-foreground"
@@ -277,6 +386,20 @@ function ConfirmPage() {
           }`}
         >
           Fill out manually
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode("voice");
+            set("source", "voice_interview");
+          }}
+          className={`px-4 py-2 text-sm font-medium rounded ${
+            mode === "voice"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Talk to our assistant
         </button>
       </div>
 
@@ -287,28 +410,30 @@ function ConfirmPage() {
             Our voice assistant will interview you about your move. Your answers populate the same
             spec below — switch to “Fill out manually” anytime to review and edit.
           </p>
-          <div className="mt-4">
-            {createElement("elevenlabs-convai", { "agent-id": ELEVENLABS_AGENT_ID })}
+          <div ref={widgetHostRef} className="mt-4">
+            {createElement("elevenlabs-convai", { "agent-id": ELEVENLABS_INTAKE_AGENT_ID })}
           </div>
           <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
             <p className="text-xs text-muted-foreground">
-              Once you're done chatting, confirm to send the spec to the Negotiator.
+              After you verbally confirm the summary, the assistant will create a draft for review.
             </p>
-            <button
-              type="button"
-              onClick={() => onSubmit({ preventDefault: () => {} } as React.FormEvent)}
-              disabled={submitting}
-              className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-            >
-              {submitting ? "Submitting…" : "Confirm Spec"}
-            </button>
+            <span className="text-xs font-medium text-muted-foreground">
+              {submitStatus === "creating" ? "Creating draft..." : "Waiting for voice draft"}
+            </span>
           </div>
         </div>
       )}
 
       {confirmed && (
         <div className="mb-6 rounded-md border border-primary/30 bg-accent px-4 py-3 text-sm text-primary">
-          Spec confirmed. Job ID: <span className="font-mono">{jobSpecId}</span>. The Negotiator will start calling movers.
+          Spec confirmed. Job ID: <span className="font-mono">{jobSpecId}</span>. The Negotiator is ready for mover outreach.
+          {discoveryStatus && <div className="mt-1 text-xs">{discoveryStatus}</div>}
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-6 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
         </div>
       )}
 
@@ -502,14 +627,20 @@ function ConfirmPage() {
 
         <div className="flex items-center justify-between border-t border-border pt-4">
           <div className="text-xs text-muted-foreground">
-            {jobSpecId ? `job_spec_id: ${jobSpecId}` : "Not yet submitted"}
+            {jobSpecId ? `Draft job_spec_id: ${jobSpecId}` : "Draft not created yet"}
           </div>
           <button
             type="submit"
             disabled={submitting}
             className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
           >
-            {submitting ? "Submitting…" : "Confirm Spec"}
+            {submitStatus === "creating"
+              ? "Creating draft..."
+              : submitStatus === "confirming"
+              ? "Confirming..."
+              : jobSpecId
+              ? "Confirm Spec"
+              : "Create Draft"}
           </button>
         </div>
 

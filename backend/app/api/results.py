@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.voice_errors import as_http_exception
 from app.clients.eleven_client import ElevenLabsClient, ElevenLabsError
+from app.database import list_quotes
 from app.dependencies.voice import (
     VoiceRepository,
     get_elevenlabs_client,
@@ -22,7 +23,10 @@ _connections: dict[str, list[WebSocket]] = {}
 
 @router.get("/{job_spec_id}", response_model=Report)
 def get_report(job_spec_id: str):
-    return ranking.rank_quotes(job_spec_id, quotes.get(job_spec_id, []))
+    merged = {quote.call_id: quote for quote in list_quotes(job_spec_id)}
+    for quote in quotes.get(job_spec_id, []):
+        merged[quote.call_id] = quote
+    return ranking.rank_quotes(job_spec_id, list(merged.values()))
 
 
 @router.websocket("/ws/{job_spec_id}")
@@ -42,7 +46,10 @@ async def report_updates(websocket: WebSocket, job_spec_id: str):
 async def broadcast_report_update(job_spec_id: str):
     """Call this (e.g. from api/calls.py after call_completed) to push a fresh
     report to any connected frontend clients."""
-    report = ranking.rank_quotes(job_spec_id, quotes.get(job_spec_id, []))
+    merged = {quote.call_id: quote for quote in list_quotes(job_spec_id)}
+    for quote in quotes.get(job_spec_id, []):
+        merged[quote.call_id] = quote
+    report = ranking.rank_quotes(job_spec_id, list(merged.values()))
     for ws in _connections.get(job_spec_id, []):
         await ws.send_json(report.model_dump())
 

@@ -35,6 +35,7 @@ def rank_quotes(job_spec_id: str, quotes: list[Quote]) -> Report:
                 company_id=quote.company_id,
                 company=quote.company,
                 total=quote.total,
+                final_price=quote.total,
                 fees=quote.fees,
                 differentiators=quote.differentiators,
                 red_flag=red_flag,

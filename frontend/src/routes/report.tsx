@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { getResults, type RankedCompany, type Report } from "@/lib/api";
+import { getResults, reportWebSocketUrl, type RankedCompany, type Report } from "@/lib/api";
 
 export const Route = createFileRoute("/report")({
   head: () => ({
@@ -16,6 +16,10 @@ function currency(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
+function finalPrice(quote: RankedCompany) {
+  return quote.final_price ?? quote.total;
+}
+
 function Row({ quote }: { quote: RankedCompany }) {
   const [open, setOpen] = useState(false);
   return (
@@ -28,7 +32,7 @@ function Row({ quote }: { quote: RankedCompany }) {
             <div className="mt-0.5 text-xs font-medium text-primary">Recommended</div>
           )}
         </td>
-        <td className="px-4 py-3 font-semibold text-foreground">{currency(quote.total)}</td>
+        <td className="px-4 py-3 font-semibold text-foreground">{currency(finalPrice(quote))}</td>
         <td className="px-4 py-3">
           {quote.red_flag ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
@@ -41,7 +45,8 @@ function Row({ quote }: { quote: RankedCompany }) {
         <td className="px-4 py-3 text-right">
           <div className="inline-flex gap-2">
             <a
-              href={quote.transcript_url}
+              href={quote.transcript_url ?? undefined}
+              aria-disabled={!quote.transcript_url}
               className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
             >
               Transcript
@@ -87,7 +92,7 @@ function Row({ quote }: { quote: RankedCompany }) {
                 <tr>
                   <td className="pt-2 text-sm font-semibold text-foreground">Total</td>
                   <td className="pt-2 text-right font-mono font-semibold text-foreground">
-                    {currency(quote.total)}
+                    {currency(finalPrice(quote))}
                   </td>
                 </tr>
               </tbody>
@@ -110,6 +115,18 @@ function ReportPage() {
     getResults(id)
       .then(setReport)
       .finally(() => setLoading(false));
+
+    if (typeof WebSocket === "undefined") return;
+    const ws = new WebSocket(reportWebSocketUrl(id));
+    ws.onmessage = (event) => {
+      try {
+        setReport(JSON.parse(event.data) as Report);
+      } catch {
+        // Ignore malformed websocket frames; the initial HTTP fetch remains authoritative.
+      }
+    };
+    ws.onopen = () => ws.send("ready");
+    return () => ws.close();
   }, []);
 
   if (loading || !report) {
@@ -158,7 +175,7 @@ function ReportPage() {
         </div>
         <div className="mt-2 flex flex-wrap items-baseline gap-3">
           <div className="text-2xl font-bold text-foreground">{recommended.company}</div>
-          <div className="text-2xl font-bold text-primary">{currency(recommended.total)}</div>
+          <div className="text-2xl font-bold text-primary">{currency(finalPrice(recommended))}</div>
         </div>
         <p className="mt-3 max-w-3xl text-sm text-foreground/80">{report.summary}</p>
       </div>
