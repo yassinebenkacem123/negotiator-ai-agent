@@ -78,12 +78,29 @@ function ConfirmPage() {
 
   const set = <K extends keyof Spec>(k: K, v: Spec[K]) => setSpec((s) => ({ ...s, [k]: v }));
 
-  const onPinChange = useCallback((kind: PinKind, lat: number, lng: number) => {
+  const onPinChange = useCallback(async (kind: PinKind, lat: number, lng: number) => {
     setSpec((s) =>
       kind === "origin"
         ? { ...s, origin_lat: lat, origin_lng: lng }
         : { ...s, destination_lat: lat, destination_lng: lng },
     );
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { display_name?: string };
+      const address = data.display_name;
+      if (!address) return;
+      setSpec((s) =>
+        kind === "origin"
+          ? { ...s, origin_address: address }
+          : { ...s, destination_address: address },
+      );
+    } catch {
+      // Ignore geocoding failures — user can still edit manually.
+    }
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -224,7 +241,7 @@ function ConfirmPage() {
         <fieldset className="grid gap-4 sm:grid-cols-2">
           <legend className="mb-2 text-sm font-semibold text-foreground">Origin</legend>
           <div className="sm:col-span-2">
-            <Label>origin_address</Label>
+            <Label>Origin Address</Label>
             <input
               className={inputCls}
               value={spec.origin_address}
@@ -232,7 +249,7 @@ function ConfirmPage() {
             />
           </div>
           <div>
-            <Label>origin_floor (0 = ground)</Label>
+            <Label>Origin Floor (0 = ground)</Label>
             <input
               type="number"
               min={0}
@@ -247,14 +264,14 @@ function ConfirmPage() {
               checked={spec.origin_has_elevator}
               onChange={(e) => set("origin_has_elevator", e.target.checked)}
             />
-            <span className="text-sm text-foreground">origin_has_elevator</span>
+            <span className="text-sm text-foreground">Has Elevator?</span>
           </label>
         </fieldset>
 
         <fieldset className="grid gap-4 sm:grid-cols-2">
           <legend className="mb-2 text-sm font-semibold text-foreground">Destination</legend>
           <div className="sm:col-span-2">
-            <Label>destination_address</Label>
+            <Label>Destination Address</Label>
             <input
               className={inputCls}
               value={spec.destination_address}
@@ -262,7 +279,7 @@ function ConfirmPage() {
             />
           </div>
           <div>
-            <Label>destination_floor (0 = ground)</Label>
+            <Label>Destination Floor (0 = ground)</Label>
             <input
               type="number"
               min={0}
@@ -277,13 +294,13 @@ function ConfirmPage() {
               checked={spec.destination_has_elevator}
               onChange={(e) => set("destination_has_elevator", e.target.checked)}
             />
-            <span className="text-sm text-foreground">destination_has_elevator</span>
+            <span className="text-sm text-foreground">Has Elevator?</span>
           </label>
         </fieldset>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label>move_date</Label>
+            <Label>Move Date</Label>
             <input
               type="date"
               className={inputCls}
@@ -297,13 +314,13 @@ function ConfirmPage() {
               checked={spec.date_flexible}
               onChange={(e) => set("date_flexible", e.target.checked)}
             />
-            <span className="text-sm text-foreground">date_flexible</span>
+            <span className="text-sm text-foreground">Flexible Date?</span>
           </label>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label>num_trips</Label>
+            <Label>Number of Trips</Label>
             <input
               type="number"
               min={0}
@@ -313,7 +330,7 @@ function ConfirmPage() {
             />
           </div>
           <div>
-            <Label>num_bags</Label>
+            <Label>Number of Bags</Label>
             <input
               type="number"
               min={0}
@@ -325,7 +342,7 @@ function ConfirmPage() {
         </div>
 
         <div>
-          <Label>notes (optional)</Label>
+          <Label>Notes (optional)</Label>
           <textarea
             className={`${inputCls} min-h-[96px]`}
             value={spec.notes}
