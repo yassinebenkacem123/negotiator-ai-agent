@@ -31,10 +31,35 @@ def is_within_working_hours(lead: Lead, now: datetime | None = None) -> bool:
     if not hours:
         return False
 
-    start_str, end_str = hours.split("-")
-    start = now.replace(hour=int(start_str.split(":")[0]), minute=int(start_str.split(":")[1]), second=0)
-    end = now.replace(hour=int(end_str.split(":")[0]), minute=int(end_str.split(":")[1]), second=0)
-    return start <= now <= end
+    hours_lower = hours.lower().strip()
+
+    # "24 hours", "24/7", "24h", "open 24 hours" — always callable
+    if "24" in hours_lower or hours_lower in ("open", "always open", "open 24h"):
+        return True
+
+    # "closed" or "by appointment" — not callable
+    if hours_lower in ("closed", "by appointment", "appointment only"):
+        return False
+
+    # Standard "HH:MM-HH:MM" or "HH:MM-HH:MM HH:MM-HH:MM" (split day)
+    try:
+        first_block = hours.split(",")[0].strip() if "," in hours else hours
+        if "-" not in first_block:
+            return False  # unknown format, safe default: don't call
+        start_str, end_str = first_block.split("-", 1)
+        start = now.replace(
+            hour=int(start_str.split(":")[0]),
+            minute=int(start_str.split(":")[1]) if ":" in start_str else 0,
+            second=0,
+        )
+        end = now.replace(
+            hour=int(end_str.split(":")[0]),
+            minute=int(end_str.split(":")[1]) if ":" in end_str else 0,
+            second=0,
+        )
+        return start <= now <= end
+    except (ValueError, IndexError):
+        return False  # unparseable format, safe default: don't call
 
 
 def initiate_call(lead: Lead, stream_webhook_url: str) -> str:

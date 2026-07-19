@@ -1,6 +1,6 @@
 fastapi
+uvicorn[standard]
 httpx
-uvicorn
 tavily-python
 elevenlabs
 twilio
@@ -11,3 +11,6 @@ pymupdf
 pytest
 pytest-asyncio
 tzdata
+websockets
+numpy
+audioop-lts
