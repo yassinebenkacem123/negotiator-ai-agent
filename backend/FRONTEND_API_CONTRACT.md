@@ -32,6 +32,16 @@ Returns a `JobSpec` object:
 
 ---
 
+## 1.5 Discovery — `POST /api/search/find-movers/{job_spec_id}`
+
+No query parameters, no body. The only location input the pipeline needs is `origin_address`, already on the confirmed job spec — city is detected from it server-side. Returns:
+```json
+{ "job_spec_id": "string", "leads": [ { "company_id": "...", "name": "...", "phone_number": "...", "address": "...", "email": "...", "website": "...", "working_hours": {...}, "source_url": "...", "city": "..." } ] }
+```
+`GET /api/search/leads/{job_spec_id}` returns the same `leads` array on its own if you need to re-fetch it later.
+
+---
+
 ## 2. Ranked Report — `GET /api/results/{job_spec_id}` and websocket `ws /api/results/ws/{job_spec_id}`
 
 Both return the same shape — the websocket pushes this automatically every time a call completes, so the frontend can use one type for both the initial fetch and live updates.
