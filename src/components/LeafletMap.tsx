@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
+
 
 // Fix default marker icons (Leaflet expects assets at specific URLs).
 const originIcon = new L.Icon({
@@ -103,13 +104,19 @@ export default function LeafletMap({
     : [destFallback.lat, destFallback.lng];
 
   const fitPoints = useMemo<Array<[number, number]>>(() => {
-    const pts: Array<[number, number]> = [];
-    if (origin) pts.push([origin.lat, origin.lng]);
-    if (destination) pts.push([destination.lat, destination.lng]);
-    if (pts.length === 0) pts.push(originPos, destPos);
-    return pts;
+    return [originPos, destPos];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin?.lat, origin?.lng, destination?.lat, destination?.lng]);
+  }, [originPos[0], originPos[1], destPos[0], destPos[1]]);
+
+  const originRef = useRef<L.Marker | null>(null);
+  const destRef = useRef<L.Marker | null>(null);
+
+  useEffect(() => {
+    if (originRef.current) originRef.current.setLatLng(originPos);
+  }, [originPos[0], originPos[1]]);
+  useEffect(() => {
+    if (destRef.current) destRef.current.setLatLng(destPos);
+  }, [destPos[0], destPos[1]]);
 
   return (
     <div className="relative h-72 w-full overflow-hidden rounded-md border border-border">
@@ -128,6 +135,7 @@ export default function LeafletMap({
         <InvalidateSize />
         <FitBounds points={fitPoints} />
         <Marker
+          ref={(m) => { originRef.current = m; }}
           position={originPos}
           draggable
           icon={originIcon}
@@ -140,6 +148,7 @@ export default function LeafletMap({
           }}
         />
         <Marker
+          ref={(m) => { destRef.current = m; }}
           position={destPos}
           draggable
           icon={destIcon}
@@ -151,6 +160,7 @@ export default function LeafletMap({
             },
           }}
         />
+
         {origin && destination && (
           <Polyline
             positions={[originPos, destPos]}
