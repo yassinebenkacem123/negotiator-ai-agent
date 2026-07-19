@@ -22,6 +22,25 @@ from app.models.lead import Lead
 _PHONE_RE = re.compile(r"(\+?1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}")
 _DIGITS_RE = re.compile(r"\D")
 
+
+def _to_e164(phone: str) -> str:
+    """Normalize a US phone number to E.164 format for Twilio.
+
+    Inputs like '718-243-0221', '(347) 512-9972', '7189071830', '855-972-4089',
+    '+1 718-243-0221' all become '+17182430221'.
+
+    Toll-free numbers (800, 888, 877, 866, 855, 844, 833) are valid E.164
+    and are kept — Twilio supports calling them.
+    """
+    digits = _DIGITS_RE.sub("", phone)
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    # Already E.164 or international — return as-is
+    return f"+{digits}" if not phone.startswith("+") else phone
+
+
 _PROFILE_SYSTEM_PROMPT = """You extract a moving company's contact profile from web
 page content. Only report fields that are actually present in the text — never
 guess, infer, or invent a phone number, address, email, or website. Respond with
@@ -33,12 +52,16 @@ JSON matching this shape exactly:
   "website": "string|null",
   "working_hours": {"mon": "08:00-18:00", "tue": "...", "...": "..."}
 }
+IMPORTANT — Phone format: Return the phone number in E.164 format with the
++1 country code prefix (e.g. "+17182430221", not "718-243-0221"). If the page
+shows a US number without the country code, add +1. For "24/7" or "24 hours"
+service, use "24 hours" as the value for each day.
 Omit any day from working_hours that isn't mentioned. If nothing is found for a
-field, use null (or {} for working_hours) rather than guessing."""
+field, use null (or {} for working_hours) rather than guessing."""  # noqa: E501
 
 _CITY_SYSTEM_PROMPT = """You extract the city and state/region from a street address.
 Respond with JSON: {"city": "City, ST"}. Use just the city and state/region, no
-street number, no zip code. If you cannot determine a city, respond {"city": null}."""
+street number, no zip code. If you cannot determine a city, respond {"city": null}."""  # noqa: E501
 
 # Directory/aggregator/review sites — never the moving company itself, and
 # calling their listed number would reach the platform, not a real mover.
@@ -59,6 +82,8 @@ _AGGREGATOR_DOMAINS = {
     "superpages.com",
     "porch.com",
     "moveline.com",
+    "extraspace.com",
+    "forbes.com",
 }
 
 
@@ -84,6 +109,16 @@ def _extract_phone(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def _normalize_website(value: str | None) -> str | None:
+    """Ensure a website URL has a scheme (https://) for valid display."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    if value.startswith(("http://", "https://")):
+        return value
+    return f"https://{value}"
+
+
 def _clean_text_field(value) -> str | None:
     """Guard against LLM output artifacts like 'Charlotte, NC|null' — take the
     first non-empty, non-'null' segment rather than trusting the raw string."""
@@ -104,8 +139,8 @@ def _extract_profile(content: str) -> dict:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
-        # Discovery must not fail a lead just because profile extraction hiccuped —
-        # callers fall back to regex phone + default hours below.
+        # Discovery must not fail a lead just because profile extraction
+        # hiccuped — callers fall back to regex phone + default hours below.
         return {}
 
 
@@ -135,8 +170,8 @@ def find_movers(city: str) -> list[Lead]:
 
     Leads without a usable phone number are dropped — a company we can't call
     is not useful to the caller pipeline (see calls.py workflow). Aggregator/
-    directory pages (Yelp, Thumbtack, BBB, ...) are skipped entirely since
-    their listed number reaches the platform, not an actual mover.
+    directory pages are skipped entirely. All phone numbers are normalized to
+    E.164 (+1XXXXXXXXXX) so Twilio can place calls without reformatting.
     """
     query = settings.search_query_template.format(city=city)
     raw_results = tavily_client.raw_search(query, max_results=settings.max_companies_per_search)
@@ -154,9 +189,12 @@ def find_movers(city: str) -> list[Lead]:
         text = result.get("raw_content") or result.get("content", "")
         profile = _extract_profile(text)
 
-        phone = profile.get("phone") or _extract_phone(text) or _extract_phone(result.get("title", ""))
-        if not phone:
+        raw_phone = profile.get("phone") or _extract_phone(text) or _extract_phone(result.get("title", ""))
+        if not raw_phone:
             continue
+
+        # Normalize to E.164 for Twilio compatibility
+        phone = _to_e164(raw_phone)
 
         normalized_phone = _normalize_phone(phone)
         if normalized_phone in seen_phones:
@@ -170,6 +208,11 @@ def find_movers(city: str) -> list[Lead]:
             else {}
         )
         hours = clean_hours or settings.default_working_hours
+
+        website = _normalize_website(
+            _clean_text_field(profile.get("website")) or url
+        )
+
         leads.append(
             Lead(
                 company_id=str(uuid.uuid4()),
@@ -177,7 +220,7 @@ def find_movers(city: str) -> list[Lead]:
                 phone_number=phone,
                 address=_clean_text_field(profile.get("address")),
                 email=_clean_text_field(profile.get("email")),
-                website=_clean_text_field(profile.get("website")) or url,
+                website=website,
                 working_hours=hours if isinstance(hours, dict) else {},
                 source_url=url,
                 city=city,

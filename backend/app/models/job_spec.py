@@ -22,3 +22,4 @@ class JobSpec(BaseModel):
     notes: Optional[str] = None
     source: str  # "voice_interview" | "document_upload"
     confirmed_by_user: bool = False
+    intake_transcript: Optional[str] = None  # set when source == "voice_interview", shown to user for review

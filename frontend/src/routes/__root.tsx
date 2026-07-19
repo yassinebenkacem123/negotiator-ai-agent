@@ -123,6 +123,9 @@ function TopNav() {
           <span className="font-semibold tracking-tight text-foreground">The Negotiator</span>
         </Link>
         <nav className="flex items-center gap-1">
+          <Link to="/voice" className={linkBase} activeProps={active}>
+            Voice Intake
+          </Link>
           <Link to="/confirm" className={linkBase} activeProps={active}>
             Confirm Spec
           </Link>

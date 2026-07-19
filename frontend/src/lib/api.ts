@@ -30,6 +30,7 @@ export type JobSpec = {
   notes: string;
   source: Source;
   distance_miles: number | null;
+  intake_transcript?: string | null;
 };
 
 export type Fee = { label: string; amount: number };
@@ -73,6 +74,53 @@ export async function getSpec(id: string): Promise<JobSpec> {
 
   const res = await fetch(`${API_BASE_URL}/specs/${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error(`getSpec failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSpec(id: string, spec: JobSpec): Promise<JobSpec> {
+  if (USE_MOCK) return mockUpdateSpec(id, spec);
+
+  const res = await fetch(`${API_BASE_URL}/specs/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec),
+  });
+  if (!res.ok) throw new Error(`updateSpec failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createSpecFromVoice(transcript: string): Promise<JobSpec> {
+  if (USE_MOCK) return mockCreateSpecFromVoice(transcript);
+
+  const res = await fetch(`${API_BASE_URL}/specs/from-voice`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript }),
+  });
+  if (!res.ok) throw new Error(`createSpecFromVoice failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createSpecFromDocument(file: File): Promise<JobSpec> {
+  if (USE_MOCK) return mockCreateSpecFromDocument();
+
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/specs/from-document`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error(`createSpecFromDocument failed: ${res.status}`);
+  return res.json();
+}
+
+export async function enrichSpecFromDocument(id: string, file: File): Promise<JobSpec> {
+  if (USE_MOCK) return mockGetSpec(id);
+
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(
+    `${API_BASE_URL}/specs/${encodeURIComponent(id)}/enrich-from-document`,
+    { method: "POST", body: formData },
+  );
+  if (!res.ok) throw new Error(`enrichSpecFromDocument failed: ${res.status}`);
   return res.json();
 }
 
@@ -129,6 +177,70 @@ async function mockCreateSpec(input: CreateSpecInput): Promise<JobSpec> {
   await delay(NETWORK_DELAY_MS);
   const job_spec_id = genId("spec");
   const spec: JobSpec = { ...input, job_spec_id, distance_miles: null };
+  specStore.set(job_spec_id, spec);
+  specCreatedAt.set(job_spec_id, Date.now());
+  return spec;
+}
+
+async function mockUpdateSpec(id: string, spec: JobSpec): Promise<JobSpec> {
+  await delay(NETWORK_DELAY_MS);
+  const updated = { ...spec, job_spec_id: id };
+  specStore.set(id, updated);
+  return updated;
+}
+
+async function mockCreateSpecFromVoice(transcript: string): Promise<JobSpec> {
+  await delay(NETWORK_DELAY_MS);
+  const job_spec_id = genId("voicespec");
+  const spec: JobSpec = {
+    job_spec_id,
+    origin_address: "6161 Brookshire Blvd, Charlotte, NC 28216",
+    origin_floor: 3,
+    origin_has_elevator: false,
+    origin_lat: null,
+    origin_lng: null,
+    destination_address: "1425 Elm Street, Rock Hill, SC 29730",
+    destination_floor: 0,
+    destination_has_elevator: false,
+    destination_lat: null,
+    destination_lng: null,
+    move_date: "2026-08-08",
+    date_flexible: true,
+    num_trips: 1,
+    num_bags: 24,
+    notes: "",
+    source: "voice_interview",
+    distance_miles: null,
+    intake_transcript: transcript,
+  };
+  specStore.set(job_spec_id, spec);
+  specCreatedAt.set(job_spec_id, Date.now());
+  return spec;
+}
+
+async function mockCreateSpecFromDocument(): Promise<JobSpec> {
+  await delay(NETWORK_DELAY_MS);
+  const job_spec_id = genId("docspec");
+  const spec: JobSpec = {
+    job_spec_id,
+    origin_address: "6161 Brookshire Blvd, Charlotte, NC 28216",
+    origin_floor: 0,
+    origin_has_elevator: false,
+    origin_lat: null,
+    origin_lng: null,
+    destination_address: "1425 Elm Street, Rock Hill, SC 29730",
+    destination_floor: 0,
+    destination_has_elevator: false,
+    destination_lat: null,
+    destination_lng: null,
+    move_date: "2026-08-08",
+    date_flexible: true,
+    num_trips: 1,
+    num_bags: 24,
+    notes: "",
+    source: "document_upload",
+    distance_miles: null,
+  };
   specStore.set(job_spec_id, spec);
   specCreatedAt.set(job_spec_id, Date.now());
   return spec;
