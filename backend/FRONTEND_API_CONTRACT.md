@@ -44,35 +44,46 @@ Both return the same shape — the websocket pushes this automatically every tim
 | `ranked_companies` | array of `RankedCompany` | sorted, cheapest → most expensive, red-flagged ones pushed to the end |
 | `summary` | string | plain-language paragraph naming the recommended company |
 
-**`RankedCompany` object (each item in `ranked_companies`):**
+**`RankedCompany` object (each item in `ranked_companies`)** — matches `frontend/src/lib/api.ts`'s `Quote & {rank, recommended}` type exactly:
 
 | Field | Type | Notes |
 |---|---|---|
 | `company_id` | string | |
-| `final_price` | number | negotiated price if one exists, else the original quote |
-| `rank` | integer | 1 = best; starts at 1 |
+| `company` | string | company name |
+| `total` | number | the price to display — negotiated price if one exists and negotiation succeeded, else the original quote. Never re-derive this yourself. |
+| `fees` | array of `{label, amount}` | e.g. `[{"label": "fuel surcharge", "amount": 40}]` |
 | `differentiators` | array of strings | e.g. `["full insurance", "money-back guarantee"]` |
-| `red_flag` | boolean | `true` if 30%+ below median and not a confirmed/successful negotiation |
+| `red_flag` | string \| null | an explanation string when flagged (e.g. `"49% below the median..."`), `null` otherwise — not a boolean |
+| `transcript_url` | string \| null | |
+| `recording_url` | string \| null | |
+| `rank` | integer | 1 = best; starts at 1 |
+| `recommended` | boolean | `true` on exactly one entry (the top non-flagged pick) |
 
 ---
 
 ## 3. Individual Call Result — `POST /api/calls/completed/{job_spec_id}/{company_id}`
 
-Returns a `Quote` object (useful if the frontend wants to show per-call detail, e.g. a transcript/recording drill-down, not just the aggregate report):
+**Dual-purpose, matching how the frontend already calls it:**
+- **Call it with no body** (as `frontend/src/lib/api.ts`'s `getCompletedCall` does) → read-only fetch of the already-stored `Quote` for that company. Returns 404 if no call has completed yet for that company.
+- **Call it with `call_id` + `transcript` query params** (+ optional `recording_url`) → telephony webhook mode: runs OpenAI extraction, stores the result, and broadcasts the updated report over the websocket. This is what P1/P2's calling pipeline uses after a real call ends — the frontend shouldn't need this mode.
+
+Returns a `Quote` object:
 
 | Field | Type | Notes |
 |---|---|---|
 | `company_id` | string | |
+| `company` | string | company name, resolved from the discovered lead |
 | `call_id` | string | |
 | `initial_price` | number \| null | |
 | `negotiated_price` | number \| null | |
 | `negotiation_successful` | boolean | |
-| `fees` | object | dynamic keys, e.g. `{"fuel_surcharge": 50, "stairs_fee": 30}` |
+| `total` | number \| null | the number to display — same value/logic as `RankedCompany.total` |
+| `fees` | array of `{label, amount}` | |
 | `differentiators` | array of strings | |
 | `outcome` | string | one of: `"quote"`, `"callback_scheduled"`, `"declined"`, `"no_answer"`, `"outside_hours_skipped"` |
-| `transcript_url` | string \| null | |
+| `transcript_url` | string \| null | not wired yet — always `null` currently |
 | `recording_url` | string \| null | |
-| `red_flag` | boolean | set later by ranking, `false` at extraction time |
+| `red_flag` | string \| null | `null` until the ranking pass runs (ranking sets this, not extraction) |
 
 ---
 
@@ -80,5 +91,5 @@ Returns a `Quote` object (useful if the frontend wants to show per-call detail, 
 
 - **Map picker for addresses**: give the user a map to drop a pin for point A and point B (in addition to or instead of typing the address). Send the pin coordinates as `origin_lat`/`origin_lng` and `destination_lat`/`destination_lng` in the `POST /api/specs` body. Do **not** calculate or send `distance_miles` yourself — the backend computes it server-side from the coordinates and returns it in the response. If a user skips the map and only types an address, leave the lat/lng fields `null`; `distance_miles` will come back `null` too in that case.
 - Poll `GET /api/results/{job_spec_id}` once on page load, then switch to the websocket for live updates — don't poll repeatedly.
-- `final_price` in the ranked report is always the number to display as "the price" — don't re-derive it from `initial_price`/`negotiated_price` yourself, that logic already happened server-side.
 - Companies with `outcome: "no_answer"` or `"outside_hours_skipped"` won't appear in `ranked_companies` yet (no price to rank) — if you want to show "still trying" state for those, that data currently only exists via P2's call-status endpoints, not P3's report endpoint. Flag this to P2 if you need a combined view.
+- **Flip `USE_MOCK` to `false` in `frontend/src/lib/api.ts`** once you're ready to hit the real backend — shapes now match exactly, verified live against real OpenAI extraction and the websocket broadcast path.

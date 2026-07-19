@@ -26,11 +26,7 @@ def start_negotiating(job_spec_id: str, stream_webhook_base_url: str):
     if not spec.confirmed_by_user:
         raise HTTPException(status_code=400, detail="job_spec not confirmed by user yet")
 
-    known_competing_prices = [
-        q.negotiated_price or q.initial_price
-        for q in quotes.get(job_spec_id, [])
-        if (q.negotiated_price or q.initial_price)
-    ]
+    known_competing_prices = [q.total for q in quotes.get(job_spec_id, []) if q.total is not None]
 
     results = []
     for lead in job_leads:
@@ -45,11 +41,46 @@ def start_negotiating(job_spec_id: str, stream_webhook_base_url: str):
     return {"job_spec_id": job_spec_id, "results": results}
 
 
+def _lead_name(job_spec_id: str, company_id: str) -> str:
+    for lead in leads.get(job_spec_id, []):
+        if lead.company_id == company_id:
+            return lead.name
+    return "Unknown Mover"
+
+
+def _find_quote(job_spec_id: str, company_id: str) -> Quote | None:
+    for quote in quotes.get(job_spec_id, []):
+        if quote.company_id == company_id:
+            return quote
+    return None
+
+
 @router.post("/completed/{job_spec_id}/{company_id}", response_model=Quote)
-async def call_completed(job_spec_id: str, company_id: str, call_id: str, transcript: str, recording_url: str | None = None):
-    """Webhook target once a call ends: extract the structured quote, store it,
-    and push a fresh ranked report to any connected frontend clients."""
-    quote = extraction.extract_quote(company_id, call_id, transcript, recording_url)
+async def call_completed(
+    job_spec_id: str,
+    company_id: str,
+    call_id: str | None = None,
+    transcript: str | None = None,
+    recording_url: str | None = None,
+):
+    """Dual-purpose by design, matching how the frontend already calls this path:
+    - With `transcript` provided: telephony webhook target once a real call ends —
+      extract the structured quote, store it, push a fresh report over the websocket.
+    - Without `transcript`: read-only fetch of the already-stored quote for this
+      company (what frontend/src/lib/api.ts's getCompletedCall expects — a POST
+      with no body that returns the existing result, not a new extraction).
+    """
+    if transcript is None:
+        existing = _find_quote(job_spec_id, company_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="no completed call found for this company yet")
+        return existing
+
+    if call_id is None:
+        raise HTTPException(status_code=400, detail="call_id is required when submitting a transcript")
+
+    company_name = _lead_name(job_spec_id, company_id)
+    quote = extraction.extract_quote(company_id, company_name, call_id, transcript, recording_url)
     quotes.setdefault(job_spec_id, []).append(quote)
     await broadcast_report_update(job_spec_id)
     return quote
