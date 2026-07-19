@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ClientOnly } from "@tanstack/react-router";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { createElement, lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { createSpec, getSpec, confirmSpec } from "@/lib/api";
+
+const ELEVENLABS_SCRIPT_SRC = "https://elevenlabs.io/convai-widget/index.js";
+const ELEVENLABS_AGENT_ID = "agent_1301kxwfxc93e9nsct5kdekedv8x";
 
 const LeafletMap = lazy(() => import("@/components/LeafletMap"));
 
@@ -70,8 +73,18 @@ const inputCls =
 
 function ConfirmPage() {
   const [spec, setSpec] = useState<Spec>(initialSpec);
+  const [mode, setMode] = useState<"voice" | "manual">("voice");
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (document.querySelector(`script[src="${ELEVENLABS_SCRIPT_SRC}"]`)) return;
+    const s = document.createElement("script");
+    s.src = ELEVENLABS_SCRIPT_SRC;
+    s.async = true;
+    document.body.appendChild(s);
+  }, []);
   const [jobSpecId, setJobSpecId] = useState<string | null>(null);
   const [distanceMiles, setDistanceMiles] = useState<number | null>(null);
   const [distanceUnavailable, setDistanceUnavailable] = useState(false);
@@ -196,7 +209,11 @@ function ConfirmPage() {
         destination_lng: spec.destination_lng,
         full: spec,
       });
-      const created = await createSpec(spec);
+      const submitSpec: Spec = {
+        ...spec,
+        source: mode === "voice" ? "voice_interview" : "document_upload",
+      };
+      const created = await createSpec(submitSpec);
       setJobSpecId(created.job_spec_id);
       if (typeof window !== "undefined") {
         window.localStorage.setItem("negotiator.job_spec_id", created.job_spec_id);
@@ -246,6 +263,57 @@ function ConfirmPage() {
         </p>
       </div>
 
+      <div className="mb-6 inline-flex rounded-md border border-border bg-card p-1">
+        <button
+          type="button"
+          onClick={() => setMode("voice")}
+          className={`px-4 py-2 text-sm font-medium rounded ${
+            mode === "voice"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Talk to our assistant
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("manual")}
+          className={`px-4 py-2 text-sm font-medium rounded ${
+            mode === "manual"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Fill out manually
+        </button>
+      </div>
+
+      {mode === "voice" && (
+        <div className="mb-6 rounded-lg border border-border bg-card p-6">
+          <h2 className="text-lg font-semibold text-foreground">Talk to our assistant</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Our voice assistant will interview you about your move. Your answers populate the same
+            spec below — switch to “Fill out manually” anytime to review and edit.
+          </p>
+          <div className="mt-4">
+            {createElement("elevenlabs-convai", { "agent-id": ELEVENLABS_AGENT_ID })}
+          </div>
+          <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">
+              Once you're done chatting, confirm to send the spec to the Negotiator.
+            </p>
+            <button
+              type="button"
+              onClick={() => onSubmit({ preventDefault: () => {} } as React.FormEvent)}
+              disabled={submitting}
+              className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            >
+              {submitting ? "Submitting…" : "Confirm Spec"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {confirmed && (
         <div className="mb-6 rounded-md border border-primary/30 bg-accent px-4 py-3 text-sm text-primary">
           Spec confirmed. Job ID: <span className="font-mono">{jobSpecId}</span>. The Negotiator will start calling movers.
@@ -253,12 +321,15 @@ function ConfirmPage() {
       )}
 
 
-      <form onSubmit={onSubmit} className="space-y-6 rounded-lg border border-border bg-card p-6">
+      <form
+        onSubmit={onSubmit}
+        className={`space-y-6 rounded-lg border border-border bg-card p-6 ${mode === "voice" ? "hidden" : ""}`}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs uppercase tracking-wide text-muted-foreground">Source</span>
             <span className="inline-flex items-center rounded-full border border-primary/30 bg-accent px-2.5 py-0.5 text-xs font-medium text-primary">
-              {spec.source}
+              {mode === "voice" ? "voice_interview" : "document_upload"}
             </span>
           </div>
           <div className="text-sm text-muted-foreground">
