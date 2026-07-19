@@ -86,7 +86,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/logo.jpeg", type: "image/jpeg" },
     ],
   }),
   shellComponent: RootShell,
@@ -117,15 +117,14 @@ function TopNav() {
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <Link to="/" className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-bold">
-            N
-          </div>
+          <img
+            src="/logo.jpeg"
+            alt="The Negotiator"
+            className="h-8 w-8 rounded-md object-cover object-top"
+          />
           <span className="font-semibold tracking-tight text-foreground">The Negotiator</span>
         </Link>
         <nav className="flex items-center gap-1">
-          <Link to="/voice" className={linkBase} activeProps={active}>
-            Voice Intake
-          </Link>
           <Link to="/confirm" className={linkBase} activeProps={active}>
             Confirm Spec
           </Link>

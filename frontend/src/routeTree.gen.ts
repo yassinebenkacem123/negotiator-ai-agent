@@ -9,21 +9,14 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as CallsRouteImport } from './routes/calls'
-import { Route as ConfirmRouteImport } from './routes/confirm'
 import { Route as ReportRouteImport } from './routes/report'
-import { Route as StartRouteImport } from './routes/start'
-import { Route as VoiceRouteImport } from './routes/voice'
+import { Route as ConfirmRouteImport } from './routes/confirm'
+import { Route as CallsRouteImport } from './routes/calls'
+import { Route as IndexRouteImport } from './routes/index'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CallsRoute = CallsRouteImport.update({
-  id: '/calls',
-  path: '/calls',
+const ReportRoute = ReportRouteImport.update({
+  id: '/report',
+  path: '/report',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConfirmRoute = ConfirmRouteImport.update({
@@ -46,22 +39,23 @@ const VoiceRoute = VoiceRouteImport.update({
   path: '/voice',
   getParentRoute: () => rootRouteImport,
 } as any)
+const VoiceIntakeRoute = VoiceIntakeRouteImport.update({
+  id: '/voice-intake',
+  path: '/voice-intake',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/calls': typeof CallsRoute
   '/confirm': typeof ConfirmRoute
   '/report': typeof ReportRoute
-  '/start': typeof StartRoute
-  '/voice': typeof VoiceRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/calls': typeof CallsRoute
   '/confirm': typeof ConfirmRoute
   '/report': typeof ReportRoute
-  '/start': typeof StartRoute
-  '/voice': typeof VoiceRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -69,15 +63,13 @@ export interface FileRoutesById {
   '/calls': typeof CallsRoute
   '/confirm': typeof ConfirmRoute
   '/report': typeof ReportRoute
-  '/start': typeof StartRoute
-  '/voice': typeof VoiceRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/calls' | '/confirm' | '/report' | '/start' | '/voice'
+  fullPaths: '/' | '/calls' | '/confirm' | '/report'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/calls' | '/confirm' | '/report' | '/start' | '/voice'
-  id: '__root__' | '/' | '/calls' | '/confirm' | '/report' | '/start' | '/voice'
+  to: '/' | '/calls' | '/confirm' | '/report'
+  id: '__root__' | '/' | '/calls' | '/confirm' | '/report'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -85,24 +77,15 @@ export interface RootRouteChildren {
   CallsRoute: typeof CallsRoute
   ConfirmRoute: typeof ConfirmRoute
   ReportRoute: typeof ReportRoute
-  StartRoute: typeof StartRoute
-  VoiceRoute: typeof VoiceRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/calls': {
-      id: '/calls'
-      path: '/calls'
-      fullPath: '/calls'
-      preLoaderRoute: typeof CallsRouteImport
+    '/report': {
+      id: '/report'
+      path: '/report'
+      fullPath: '/report'
+      preLoaderRoute: typeof ReportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/confirm': {
@@ -133,6 +116,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VoiceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/voice-intake': {
+      id: '/voice-intake'
+      path: '/voice-intake'
+      fullPath: '/voice-intake'
+      preLoaderRoute: typeof VoiceIntakeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -141,8 +131,6 @@ const rootRouteChildren: RootRouteChildren = {
   CallsRoute: CallsRoute,
   ConfirmRoute: ConfirmRoute,
   ReportRoute: ReportRoute,
-  StartRoute: StartRoute,
-  VoiceRoute: VoiceRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
