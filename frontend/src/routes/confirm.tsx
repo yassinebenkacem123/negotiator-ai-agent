@@ -70,6 +70,44 @@ function Label({ children }: { children: React.ReactNode }) {
 const inputCls =
   "mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
 
+// Shared Nominatim forward-geocode: used for manual typing, voice-assistant fills,
+// and document_upload parsed addresses. Updates the pin lat/lng on the spec.
+async function geocodeAndSetPin(
+  kind: PinKind,
+  address: string,
+  setSpec: React.Dispatch<React.SetStateAction<Spec>>,
+) {
+  try {
+    console.log(`[geocode] forward ${kind} →`, address);
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+      { headers: { Accept: "application/json" } },
+    );
+    console.log(`[geocode] forward ${kind} status`, res.status);
+    if (!res.ok) return;
+    const data = (await res.json()) as Array<{ lat: string; lon: string }>;
+    if (!data.length) {
+      console.warn(`[geocode] forward ${kind}: no results for`, address);
+      return;
+    }
+    const lat = parseFloat(data[0].lat);
+    const lng = parseFloat(data[0].lon);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+    setSpec((s) => {
+      if (kind === "origin") {
+        if (s.origin_lat === lat && s.origin_lng === lng) return s;
+        console.log("[geocode] origin pin updated", { lat, lng });
+        return { ...s, origin_lat: lat, origin_lng: lng };
+      }
+      if (s.destination_lat === lat && s.destination_lng === lng) return s;
+      console.log("[geocode] destination pin updated", { lat, lng });
+      return { ...s, destination_lat: lat, destination_lng: lng };
+    });
+  } catch (err) {
+    console.warn(`[geocode] forward ${kind} failed`, err);
+  }
+}
+
 
 function ConfirmPage() {
   const [spec, setSpec] = useState<Spec>(initialSpec);
@@ -127,37 +165,15 @@ function ConfirmPage() {
     }
   }, []);
 
-  // Debounced forward-geocoding: when the user types an address, look it up and move the pin.
+  // Debounced forward-geocoding: whenever origin_address / destination_address change
+  // — whether the user typed them, the voice assistant filled them in, or a parsed
+  // document populated them (source: "document_upload") — look the address up on
+  // Nominatim and move the corresponding map pin + lat/lng.
   useEffect(() => {
     const address = spec.origin_address.trim();
     if (!address) return;
-    const handle = setTimeout(async () => {
-      try {
-        console.log("[geocode] forward origin →", address);
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
-          { headers: { Accept: "application/json" } },
-        );
-        console.log("[geocode] forward origin status", res.status);
-        if (!res.ok) return;
-        const data = (await res.json()) as Array<{ lat: string; lon: string }>;
-        console.log("[geocode] forward origin data", data);
-        if (!data.length) {
-          console.warn("[geocode] forward origin: no results for", address);
-          return;
-        }
-        const lat = parseFloat(data[0].lat);
-        const lng = parseFloat(data[0].lon);
-        if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-        setSpec((s) => {
-          if (s.origin_lat === lat && s.origin_lng === lng) return s;
-          const next = { ...s, origin_lat: lat, origin_lng: lng };
-          console.log("[geocode] origin pin updated", { lat, lng });
-          return next;
-        });
-      } catch (err) {
-        console.warn("[geocode] forward origin failed", err);
-      }
+    const handle = setTimeout(() => {
+      geocodeAndSetPin("origin", address, setSpec);
     }, 800);
     return () => clearTimeout(handle);
   }, [spec.origin_address]);
@@ -165,36 +181,12 @@ function ConfirmPage() {
   useEffect(() => {
     const address = spec.destination_address.trim();
     if (!address) return;
-    const handle = setTimeout(async () => {
-      try {
-        console.log("[geocode] forward destination →", address);
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
-          { headers: { Accept: "application/json" } },
-        );
-        console.log("[geocode] forward destination status", res.status);
-        if (!res.ok) return;
-        const data = (await res.json()) as Array<{ lat: string; lon: string }>;
-        console.log("[geocode] forward destination data", data);
-        if (!data.length) {
-          console.warn("[geocode] forward destination: no results for", address);
-          return;
-        }
-        const lat = parseFloat(data[0].lat);
-        const lng = parseFloat(data[0].lon);
-        if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-        setSpec((s) => {
-          if (s.destination_lat === lat && s.destination_lng === lng) return s;
-          const next = { ...s, destination_lat: lat, destination_lng: lng };
-          console.log("[geocode] destination pin updated", { lat, lng });
-          return next;
-        });
-      } catch (err) {
-        console.warn("[geocode] forward destination failed", err);
-      }
+    const handle = setTimeout(() => {
+      geocodeAndSetPin("destination", address, setSpec);
     }, 800);
     return () => clearTimeout(handle);
   }, [spec.destination_address]);
+
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

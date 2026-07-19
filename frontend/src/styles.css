@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+@import "leaflet/dist/leaflet.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -141,4 +142,12 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
+}
+
+/* Leaflet map containers must have an explicit height when initialized. */
+.leaflet-container {
+  height: 100%;
+  min-height: 18rem;
+  width: 100%;
+  z-index: 1;
 }

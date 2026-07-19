@@ -1,4 +1,3 @@
-import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo } from "react";
 import L from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
@@ -47,6 +46,48 @@ function FitBounds({ points }: { points: Array<[number, number]> }) {
   return null;
 }
 
+function InvalidateSize() {
+  const map = useMap();
+  useEffect(() => {
+    // Leaflet needs an explicit size recalculation after mounting in a
+    // flex/grid layout or when it was initialized inside a hidden container
+    // (e.g., a tab panel). Otherwise tiles only render in a small box.
+    const container = map.getContainer();
+    const invalidate = () => {
+      map.invalidateSize(true);
+      console.log("Leaflet invalidateSize called");
+    };
+
+    // Initial recalculation after the container has had a chance to layout.
+    const timer = setTimeout(invalidate, 100);
+
+    // Recalculate when the window resizes.
+    const handleResize = () => invalidate();
+    window.addEventListener("resize", handleResize);
+
+    // Recalculate when the container itself changes size (e.g., becomes visible).
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0) {
+            invalidate();
+          }
+        }
+      });
+      observer.observe(container);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", handleResize);
+      if (observer) observer.disconnect();
+    };
+  }, [map]);
+  return null;
+}
+
 export default function LeafletMap({
   origin,
   destination,
@@ -74,6 +115,7 @@ export default function LeafletMap({
     <div className="relative h-72 w-full overflow-hidden rounded-md border border-border">
       <style>{`.leaflet-dest-marker { filter: hue-rotate(140deg) saturate(1.2); }`}</style>
       <MapContainer
+        className="h-full w-full"
         center={originPos}
         zoom={7}
         scrollWheelZoom
@@ -83,6 +125,7 @@ export default function LeafletMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <InvalidateSize />
         <FitBounds points={fitPoints} />
         <Marker
           position={originPos}
