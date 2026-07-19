@@ -67,7 +67,7 @@ def start_negotiating(job_spec_id: str, stream_webhook_base_url: str):
         wss_base = stream_webhook_base_url.replace("https://", "wss://")
         call_sid = telephony.initiate_call(
             lead,
-            f"{stream_webhook_base_url}/api/calls/stream/{lead.company_id}?wss_url={wss_base}"
+            f"{stream_webhook_base_url}/api/calls/stream/{lead.company_id}?wss_url={wss_base}&job_spec_id={job_spec_id}"
         )
         results.append(
             {"company_id": lead.company_id, "status": "calling", "call_sid": call_sid}
@@ -94,6 +94,10 @@ def stream_twiml(
             "but with wss:// instead of https://."
         ),
     ),
+    job_spec_id: str = Query(
+        default="",
+        description="ID of the job spec to associate with this call.",
+    ),
 ):
     """TwiML endpoint — Twilio fetches this when placing an outbound call.
 
@@ -101,7 +105,7 @@ def stream_twiml(
     /media-stream endpoint so we can process audio in real-time.
     """
     base = wss_url if wss_url else "wss://localhost:8000"
-    ws_url = f"{base}/media-stream/{company_id}"
+    ws_url = f"{base}/media-stream/{company_id}?job_spec_id={job_spec_id}"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
