@@ -4,7 +4,8 @@ delegate conversation setup to voice_service.py. No calling/negotiation
 logic lives in this file.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
 from app.api.results import broadcast_report_update
 from app.models.quote import Quote
@@ -46,6 +47,33 @@ def _lead_name(job_spec_id: str, company_id: str) -> str:
         if lead.company_id == company_id:
             return lead.name
     return "Unknown Mover"
+
+
+@router.get("/stream/{company_id}", response_class=PlainTextResponse)
+def stream_twiml(
+    company_id: str,
+    wss_url: str = Query(
+        default="",
+        description=(
+            "Public WebSocket origin, e.g. 'wss://abc123.ngrok.io'. "
+            "Pass the same base you use for stream_webhook_base_url, "
+            "but with wss:// instead of https://."
+        ),
+    ),
+):
+    """TwiML endpoint — Twilio fetches this when placing an outbound call.
+
+    Returns XML that tells Twilio to open a <Stream> WebSocket to our
+    /media-stream endpoint so we can process audio in real-time.
+    """
+    base = wss_url if wss_url else "wss://localhost:8000"
+    ws_url = f"{base}/media-stream/{company_id}"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="{ws_url}" />
+    </Connect>
+</Response>"""
 
 
 def _find_quote(job_spec_id: str, company_id: str) -> Quote | None:

@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 tavily-python
 elevenlabs
 twilio
@@ -7,3 +7,6 @@ openai
 pydantic-settings
 python-multipart
 tzdata
+websockets
+numpy
+audioop-lts
