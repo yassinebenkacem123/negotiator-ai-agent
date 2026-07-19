@@ -1,6 +1,6 @@
 // Mock/real API module. Switching backends only requires editing these two constants:
-export const API_BASE_URL = "/api";
-const USE_MOCK = true;
+export const API_BASE_URL = "http://127.0.0.1:8000";
+const USE_MOCK = false;
 
 const NETWORK_DELAY_MS = 800;
 const DISTANCE_DELAY_MS = 3000;
