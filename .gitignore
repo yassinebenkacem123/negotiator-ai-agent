@@ -26,6 +26,6 @@ frontend/build/
 *~
 .DS_Store
 Thumbs.db
-
+.agent
 # ─── Project-specific ──────────────────────────────────────────────
 *.log

@@ -1,4 +1,5 @@
 fastapi
+httpx
 uvicorn
 tavily-python
 elevenlabs
@@ -6,4 +7,6 @@ twilio
 openai
 pydantic-settings
 python-multipart
+pytest
+pytest-asyncio
 tzdata

@@ -4,24 +4,35 @@ Nothing outside this file should hardcode a threshold, tactic list, or vendor
 credential. If ranking.py needs the red-flag cutoff, it imports it from here.
 """
 
-from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    app_env: str = "development"
+
     # --- Vendor credentials (loaded from .env, never hardcoded) ---
     openai_api_key: str = ""
     tavily_api_key: str = ""
     elevenlabs_api_key: str = ""
-    elevenlabs_agent_id_estimator: str = ""
-    elevenlabs_agent_id_caller: str = ""
+    elevenlabs_caller_agent_id: str = ""
+    elevenlabs_webhook_secret: str = ""
+    backend_public_url: str = "http://localhost:8000"
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
-    twilio_from_number: str = ""
+    twilio_from_number: str = Field(
+        default="",
+        validation_alias=AliasChoices("TWILIO_PHONE_NUMBER", "TWILIO_FROM_NUMBER"),
+    )
     ip_api_base_url: str = "http://ip-api.com/json"
 
     # --- Negotiation / ranking levers ---
     red_flag_below_median_pct: float = 0.30  # 30%+ below median => red flag
-    negotiation_max_rounds: int = 2          # how many push-back attempts per call
+    negotiation_max_rounds: int = 2  # how many push-back attempts per call
 
     # --- Discovery levers ---
     max_companies_per_search: int = 10
@@ -44,10 +55,6 @@ class Settings(BaseSettings):
         "fri": "08:00-18:00",
         "sat": "08:00-18:00",
     }
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 settings = Settings()
