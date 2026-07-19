@@ -79,18 +79,29 @@ function ConfirmPage() {
   const set = <K extends keyof Spec>(k: K, v: Spec[K]) => setSpec((s) => ({ ...s, [k]: v }));
 
   const onPinChange = useCallback(async (kind: PinKind, lat: number, lng: number) => {
-    setSpec((s) =>
-      kind === "origin"
-        ? { ...s, origin_lat: lat, origin_lng: lng }
-        : { ...s, destination_lat: lat, destination_lng: lng },
-    );
+    console.log("[geocode] pin dragged", { kind, lat, lng });
+    setSpec((s) => {
+      const next =
+        kind === "origin"
+          ? { ...s, origin_lat: lat, origin_lng: lng }
+          : { ...s, destination_lat: lat, destination_lng: lng };
+      console.log("[geocode] pin state updated", {
+        origin_lat: next.origin_lat,
+        origin_lng: next.origin_lng,
+        destination_lat: next.destination_lat,
+        destination_lng: next.destination_lng,
+      });
+      return next;
+    });
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-        { headers: { Accept: "application/json" } },
-      );
+      // Note: browsers forbid setting the User-Agent header on fetch; it's set
+      // automatically by the browser and Nominatim accepts a valid Referer instead.
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      console.log("[geocode] reverse response", { kind, status: res.status });
       if (!res.ok) return;
       const data = (await res.json()) as { display_name?: string };
+      console.log("[geocode] reverse data", { kind, display_name: data.display_name });
       const address = data.display_name;
       if (!address) return;
       setSpec((s) =>
@@ -98,8 +109,8 @@ function ConfirmPage() {
           ? { ...s, origin_address: address }
           : { ...s, destination_address: address },
       );
-    } catch {
-      // Ignore geocoding failures — user can still edit manually.
+    } catch (err) {
+      console.warn("[geocode] reverse failed", err);
     }
   }, []);
 
@@ -109,23 +120,30 @@ function ConfirmPage() {
     if (!address) return;
     const handle = setTimeout(async () => {
       try {
+        console.log("[geocode] forward origin →", address);
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
           { headers: { Accept: "application/json" } },
         );
+        console.log("[geocode] forward origin status", res.status);
         if (!res.ok) return;
         const data = (await res.json()) as Array<{ lat: string; lon: string }>;
-        if (!data.length) return;
+        console.log("[geocode] forward origin data", data);
+        if (!data.length) {
+          console.warn("[geocode] forward origin: no results for", address);
+          return;
+        }
         const lat = parseFloat(data[0].lat);
         const lng = parseFloat(data[0].lon);
         if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-        setSpec((s) =>
-          s.origin_lat === lat && s.origin_lng === lng
-            ? s
-            : { ...s, origin_lat: lat, origin_lng: lng },
-        );
-      } catch {
-        // ignore
+        setSpec((s) => {
+          if (s.origin_lat === lat && s.origin_lng === lng) return s;
+          const next = { ...s, origin_lat: lat, origin_lng: lng };
+          console.log("[geocode] origin pin updated", { lat, lng });
+          return next;
+        });
+      } catch (err) {
+        console.warn("[geocode] forward origin failed", err);
       }
     }, 800);
     return () => clearTimeout(handle);
@@ -136,23 +154,30 @@ function ConfirmPage() {
     if (!address) return;
     const handle = setTimeout(async () => {
       try {
+        console.log("[geocode] forward destination →", address);
         const res = await fetch(
           `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
           { headers: { Accept: "application/json" } },
         );
+        console.log("[geocode] forward destination status", res.status);
         if (!res.ok) return;
         const data = (await res.json()) as Array<{ lat: string; lon: string }>;
-        if (!data.length) return;
+        console.log("[geocode] forward destination data", data);
+        if (!data.length) {
+          console.warn("[geocode] forward destination: no results for", address);
+          return;
+        }
         const lat = parseFloat(data[0].lat);
         const lng = parseFloat(data[0].lon);
         if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-        setSpec((s) =>
-          s.destination_lat === lat && s.destination_lng === lng
-            ? s
-            : { ...s, destination_lat: lat, destination_lng: lng },
-        );
-      } catch {
-        // ignore
+        setSpec((s) => {
+          if (s.destination_lat === lat && s.destination_lng === lng) return s;
+          const next = { ...s, destination_lat: lat, destination_lng: lng };
+          console.log("[geocode] destination pin updated", { lat, lng });
+          return next;
+        });
+      } catch (err) {
+        console.warn("[geocode] forward destination failed", err);
       }
     }, 800);
     return () => clearTimeout(handle);
@@ -164,6 +189,13 @@ function ConfirmPage() {
     setDistanceMiles(null);
     setDistanceUnavailable(false);
     try {
+      console.log("[submit] POST /api/specs body", {
+        origin_lat: spec.origin_lat,
+        origin_lng: spec.origin_lng,
+        destination_lat: spec.destination_lat,
+        destination_lng: spec.destination_lng,
+        full: spec,
+      });
       const created = await createSpec(spec);
       setJobSpecId(created.job_spec_id);
       if (typeof window !== "undefined") {
