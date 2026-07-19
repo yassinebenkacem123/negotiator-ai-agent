@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 
 class JobSpec(BaseModel):
-    job_spec_id: str
+    job_spec_id: str = ""  # frontend's CreateSpecInput omits this entirely; server generates it
     origin_address: str
     origin_floor: int = 0  # 0 = ground floor
     origin_has_elevator: bool = False
