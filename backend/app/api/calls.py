@@ -64,8 +64,10 @@ def start_negotiating(job_spec_id: str, stream_webhook_base_url: str):
             )
             continue
 
+        wss_base = stream_webhook_base_url.replace("https://", "wss://")
         call_sid = telephony.initiate_call(
-            lead, f"{stream_webhook_base_url}/api/calls/stream/{lead.company_id}"
+            lead,
+            f"{stream_webhook_base_url}/api/calls/stream/{lead.company_id}?wss_url={wss_base}"
         )
         results.append(
             {"company_id": lead.company_id, "status": "calling", "call_sid": call_sid}
