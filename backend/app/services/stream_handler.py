@@ -325,7 +325,12 @@ class StreamHandler:
 
     async def run(self) -> dict[str, Any]:
         self.tts = TTSSession()
-        await self.tts.connect()
+        try:
+            await self.tts.connect()
+        except Exception:
+            logger.exception(f"[{self.company}] TTS connect failed — check ELEVENLABS_API_KEY")
+            self.tts = None
+
 
         recv  = asyncio.create_task(self._tts_receive_loop())
         send  = asyncio.create_task(self._send_loop())
@@ -372,6 +377,9 @@ class StreamHandler:
                 return
 
     async def _greet(self) -> None:
+        if not self.tts:
+            logger.warning(f"[{self.company}] TTS not available — skipping greeting")
+            return
         greeting = (
             f"Hello, I am an AI assistant calling about {self.service}. "
             f"Am I speaking with someone from {self.company}?"
