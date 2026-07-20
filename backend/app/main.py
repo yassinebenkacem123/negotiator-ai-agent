@@ -40,7 +40,8 @@ app.include_router(results.router)
 
 @app.on_event("startup")
 def startup() -> None:
-    initialize_database()
+    if settings.database_url:
+        initialize_database()
 
 
 # ---------------------------------------------------------------------------
@@ -102,4 +103,13 @@ def health():
     return {
         "status": "healthy",
         "database": check_database_connection(),
+    }
+
+
+@app.get("/test")
+def deployment_test():
+    return {
+        "status": "ok",
+        "message": "Backend deployed successfully",
+        "environment": settings.app_env,
     }
