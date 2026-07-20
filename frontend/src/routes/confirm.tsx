@@ -45,7 +45,7 @@ type SubmitStatus = "idle" | "creating" | "confirming";
 
 function friendlyError(message: string) {
   if (message.includes("Failed to fetch") || message.includes("NetworkError")) {
-    return "Could not reach the backend. Check that ngrok is running and the frontend API URL is current.";
+    return "Could not reach the backend. Check that the frontend API URL is current.";
   }
   if (message.includes("422")) return "Some required move details are missing or invalid. Please review the form.";
   if (message.includes("400")) return "The backend rejected this step. Please review the draft before confirming.";
