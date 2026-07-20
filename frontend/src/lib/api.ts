@@ -1,5 +1,5 @@
 // Mock/real API module. Switching backends only requires editing VITE_API_BASE_URL.
-const DEFAULT_BACKEND_BASE_URL = "https://5a0b-160-178-38-22.ngrok-free.app";
+const DEFAULT_BACKEND_BASE_URL = "https://c7be-160-178-192-67.ngrok-free.app";
 const configuredBackendBaseUrl =
   import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_BACKEND_BASE_URL;
 export const BACKEND_BASE_URL = configuredBackendBaseUrl.replace(/\/+$/, "");
@@ -8,7 +8,7 @@ export const API_BASE_URL = BACKEND_BASE_URL.endsWith("/api")
   : `${BACKEND_BASE_URL}/api`;
 const API_HEADERS = { "ngrok-skip-browser-warning": "true" };
 const JSON_HEADERS = { ...API_HEADERS, "Content-Type": "application/json" };
-const USE_MOCK = false;
+const USE_MOCK = true;
 
 const NETWORK_DELAY_MS = 800;
 const DISTANCE_DELAY_MS = 3000;

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     elevenlabs_test_company_name: str = "Test Moving Company"
     elevenlabs_test_company_phone: str = "+212610833077"
     elevenlabs_webhook_secret: str = ""
-    backend_public_url: str = "https://5a0b-160-178-38-22.ngrok-free.app"
+    backend_public_url: str = "https://c7be-160-178-192-67.ngrok-free.app"
     frontend_cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:8080,http://127.0.0.1:8080"
