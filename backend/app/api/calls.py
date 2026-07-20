@@ -74,10 +74,11 @@ def _artifact_for(job_spec_id: str, company_id: str):
 
 
 def _set_call_state(job_spec_id: str, company_id: str, **updates) -> None:
-    rows = call_states.setdefault(job_spec_id, {})
+    rows = call_states.get(job_spec_id, {})
     current = rows.get(company_id, {})
     current.update(updates)
     rows[company_id] = current
+    call_states[job_spec_id] = rows
 
 
 def _test_company() -> Lead:
@@ -383,7 +384,9 @@ async def call_completed(
     quote = extraction.extract_quote(
         company_id, company_name, call_id, transcript, recording_url
     )
-    quotes.setdefault(job_spec_id, []).append(quote)
+    stored_quotes = quotes.get(job_spec_id, [])
+    stored_quotes.append(quote)
+    quotes[job_spec_id] = stored_quotes
     upsert_completed_call(
         job_spec_id=job_spec_id,
         quote_input=P3QuoteInput(

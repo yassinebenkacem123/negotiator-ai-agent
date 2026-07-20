@@ -1,13 +1,10 @@
-"""SQLite persistence for completed calls.
-
-The rest of the app still owns business logic; this module only stores and
-retrieves completed call/quote records so they survive process restarts.
-"""
+"""Neon Postgres persistence with a SQLite backend retained for tests."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,22 +13,45 @@ from app.config import settings
 from app.models.quote import Fee, Quote
 from app.models.voice import P3QuoteInput, StoredCallArtifact
 
+_initialized_database_urls: set[str] = set()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _path_from_url(database_url: str | None = None) -> Path:
+def _database_url(database_url: str | None = None) -> str:
     url = database_url or settings.database_url
+    if not url:
+        raise RuntimeError("DATABASE_URL is required")
+    return url
+
+
+def _is_postgres(database_url: str | None = None) -> bool:
+    return _database_url(database_url).startswith(("postgresql://", "postgres://"))
+
+
+def _path_from_url(database_url: str | None = None) -> Path:
+    url = _database_url(database_url)
     prefix = "sqlite:///"
     if not url.startswith(prefix):
-        raise ValueError("Only sqlite:/// DATABASE_URL values are supported")
+        raise ValueError("DATABASE_URL must use postgresql://, postgres://, or sqlite:///")
     raw_path = url[len(prefix) :]
     path = Path(raw_path)
     return path if path.is_absolute() else Path.cwd() / path
 
 
-def connect() -> sqlite3.Connection:
+def connect():
+    if _is_postgres():
+        from psycopg import connect as postgres_connect
+        from psycopg.rows import dict_row
+
+        return postgres_connect(
+            _database_url(),
+            row_factory=dict_row,
+            connect_timeout=10,
+        )
+
     path = _path_from_url()
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -39,12 +59,27 @@ def connect() -> sqlite3.Connection:
     return connection
 
 
+def _sql(statement: str) -> str:
+    """Translate the project's DB-API placeholders for Psycopg."""
+
+    return statement.replace("?", "%s") if _is_postgres() else statement
+
+
+def _execute(db, statement: str, values: tuple | list = ()):
+    return db.execute(_sql(statement), values)
+
+
 def initialize_database() -> None:
+    database_url = _database_url()
+    if database_url in _initialized_database_urls:
+        return
     with connect() as db:
-        db.execute(
-            """
+        id_definition = "BIGSERIAL PRIMARY KEY" if _is_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        _execute(
+            db,
+            f"""
             CREATE TABLE IF NOT EXISTS calls (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {id_definition},
                 call_id TEXT UNIQUE,
                 conversation_id TEXT UNIQUE,
                 job_spec_id TEXT,
@@ -70,15 +105,40 @@ def initialize_database() -> None:
             )
             """
         )
-        columns = {
-            row["name"] for row in db.execute("PRAGMA table_info(calls)").fetchall()
-        }
-        if "company_phone" not in columns:
-            db.execute("ALTER TABLE calls ADD COLUMN company_phone TEXT")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_calls_job_spec_id ON calls(job_spec_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_calls_company_id ON calls(company_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_calls_completed_at ON calls(completed_at)")
+        if _is_postgres():
+            _execute(db, "ALTER TABLE calls ADD COLUMN IF NOT EXISTS company_phone TEXT")
+        else:
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(calls)").fetchall()
+            }
+            if "company_phone" not in columns:
+                db.execute("ALTER TABLE calls ADD COLUMN company_phone TEXT")
+        _execute(db, "CREATE INDEX IF NOT EXISTS idx_calls_job_spec_id ON calls(job_spec_id)")
+        _execute(db, "CREATE INDEX IF NOT EXISTS idx_calls_company_id ON calls(company_id)")
+        _execute(db, "CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status)")
+        _execute(db, "CREATE INDEX IF NOT EXISTS idx_calls_completed_at ON calls(completed_at)")
+        _execute(
+            db,
+            """
+            CREATE TABLE IF NOT EXISTS app_state (
+                namespace TEXT NOT NULL,
+                state_key TEXT NOT NULL,
+                value_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (namespace, state_key)
+            )
+            """,
+        )
+        _execute(
+            db,
+            """
+            CREATE TABLE IF NOT EXISTS processed_webhook_events (
+                event_key TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            )
+            """,
+        )
+    _initialized_database_urls.add(database_url)
 
 
 def _json(value: Any) -> str:
@@ -94,7 +154,7 @@ def _loads(value: str | None, fallback):
         return fallback
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Mapping[str, Any]) -> dict[str, Any]:
     payload = dict(row)
     payload["negotiation_successful"] = bool(payload["negotiation_successful"])
     payload["red_flag"] = bool(payload["red_flag"])
@@ -110,7 +170,7 @@ def _quote_total(row: dict[str, Any]) -> float | None:
     return row["initial_price"]
 
 
-def _quote_from_row(row: sqlite3.Row) -> Quote:
+def _quote_from_row(row: Mapping[str, Any]) -> Quote:
     payload = _row_to_dict(row)
     fees = [
         Fee(label=label, amount=float(amount))
@@ -153,7 +213,8 @@ def upsert_completed_call(
     transcript = [turn.model_dump() for turn in artifact.transcript] if artifact else []
 
     with connect() as db:
-        existing = db.execute(
+        existing = _execute(
+            db,
             "SELECT id, created_at FROM calls WHERE call_id = ? OR conversation_id = ?",
             (quote_input.call_id, conversation_id),
         ).fetchone()
@@ -183,7 +244,8 @@ def upsert_completed_call(
             now,
         )
         if existing:
-            db.execute(
+            _execute(
+                db,
                 """
                 UPDATE calls SET
                     call_id = ?,
@@ -213,7 +275,8 @@ def upsert_completed_call(
                 (*values, existing["id"]),
             )
         else:
-            db.execute(
+            _execute(
+                db,
                 """
                 INSERT INTO calls (
                     call_id, conversation_id, job_spec_id, company_id, company_name,
@@ -225,7 +288,11 @@ def upsert_completed_call(
                 """,
                 values,
             )
-        row = db.execute("SELECT * FROM calls WHERE call_id = ?", (quote_input.call_id,)).fetchone()
+        row = _execute(
+            db,
+            "SELECT * FROM calls WHERE call_id = ?",
+            (quote_input.call_id,),
+        ).fetchone()
     return _row_to_dict(row)
 
 
@@ -243,7 +310,8 @@ def upsert_started_call(
     initialize_database()
     now = _now()
     with connect() as db:
-        db.execute(
+        _execute(
+            db,
             """
             INSERT INTO calls (
                 call_id, conversation_id, job_spec_id, company_id, company_name,
@@ -278,7 +346,11 @@ def upsert_started_call(
                 now,
             ),
         )
-        row = db.execute("SELECT * FROM calls WHERE call_id = ?", (call_id,)).fetchone()
+        row = _execute(
+            db,
+            "SELECT * FROM calls WHERE call_id = ?",
+            (call_id,),
+        ).fetchone()
     return _row_to_dict(row)
 
 
@@ -303,7 +375,8 @@ def list_calls(
             values.append(value)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with connect() as db:
-        rows = db.execute(
+        rows = _execute(
+            db,
             f"SELECT * FROM calls {where} ORDER BY completed_at DESC, updated_at DESC",
             values,
         ).fetchall()
@@ -313,7 +386,8 @@ def list_calls(
 def get_call(call_id: str) -> dict[str, Any] | None:
     initialize_database()
     with connect() as db:
-        row = db.execute(
+        row = _execute(
+            db,
             "SELECT * FROM calls WHERE call_id = ? OR conversation_id = ?",
             (call_id, call_id),
         ).fetchone()
@@ -323,8 +397,122 @@ def get_call(call_id: str) -> dict[str, Any] | None:
 def list_quotes(job_spec_id: str) -> list[Quote]:
     initialize_database()
     with connect() as db:
-        rows = db.execute(
+        rows = _execute(
+            db,
             "SELECT * FROM calls WHERE job_spec_id = ? AND initial_price IS NOT NULL",
             (job_spec_id,),
         ).fetchall()
     return [_quote_from_row(row) for row in rows]
+
+
+def get_state(namespace: str, key: str) -> Any | None:
+    initialize_database()
+    with connect() as db:
+        row = _execute(
+            db,
+            "SELECT value_json FROM app_state WHERE namespace = ? AND state_key = ?",
+            (namespace, key),
+        ).fetchone()
+    return _loads(row["value_json"], None) if row else None
+
+
+def set_state(namespace: str, key: str, value: Any) -> None:
+    initialize_database()
+    with connect() as db:
+        _execute(
+            db,
+            """
+            INSERT INTO app_state (namespace, state_key, value_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(namespace, state_key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at
+            """,
+            (namespace, key, _json(value), _now()),
+        )
+
+
+def delete_state(namespace: str, key: str) -> None:
+    initialize_database()
+    with connect() as db:
+        _execute(
+            db,
+            "DELETE FROM app_state WHERE namespace = ? AND state_key = ?",
+            (namespace, key),
+        )
+
+
+def list_state(namespace: str) -> dict[str, Any]:
+    initialize_database()
+    with connect() as db:
+        rows = _execute(
+            db,
+            "SELECT state_key, value_json FROM app_state WHERE namespace = ?",
+            (namespace,),
+        ).fetchall()
+    return {row["state_key"]: _loads(row["value_json"], None) for row in rows}
+
+
+def claim_webhook_event(event_key: str) -> bool:
+    initialize_database()
+    with connect() as db:
+        if _is_postgres():
+            row = _execute(
+                db,
+                """
+                INSERT INTO processed_webhook_events (event_key, created_at)
+                VALUES (?, ?)
+                ON CONFLICT(event_key) DO NOTHING
+                RETURNING event_key
+                """,
+                (event_key, _now()),
+            ).fetchone()
+            return row is not None
+        cursor = _execute(
+            db,
+            "INSERT OR IGNORE INTO processed_webhook_events (event_key, created_at) VALUES (?, ?)",
+            (event_key, _now()),
+        )
+        return cursor.rowcount == 1
+
+
+def webhook_event_exists(event_key: str) -> bool:
+    initialize_database()
+    with connect() as db:
+        row = _execute(
+            db,
+            "SELECT event_key FROM processed_webhook_events WHERE event_key = ?",
+            (event_key,),
+        ).fetchone()
+    return row is not None
+
+
+def release_webhook_event(event_key: str) -> None:
+    initialize_database()
+    with connect() as db:
+        _execute(
+            db,
+            "DELETE FROM processed_webhook_events WHERE event_key = ?",
+            (event_key,),
+        )
+
+
+def list_webhook_events() -> list[str]:
+    initialize_database()
+    with connect() as db:
+        rows = _execute(
+            db,
+            "SELECT event_key FROM processed_webhook_events ORDER BY created_at",
+        ).fetchall()
+    return [row["event_key"] for row in rows]
+
+
+def check_database_connection() -> str:
+    """Execute a real query and return the active database backend name."""
+
+    initialize_database()
+    with connect() as db:
+        row = _execute(db, "SELECT 1 AS ok").fetchone()
+    if not row or row["ok"] != 1:
+        raise RuntimeError("Database health check returned an unexpected result")
+    return "postgresql" if _is_postgres() else "sqlite"

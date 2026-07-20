@@ -153,4 +153,5 @@ def confirm_spec(job_spec_id: str):
     if not spec:
         raise HTTPException(status_code=404, detail="job_spec not found")
     spec.confirmed_by_user = True
+    job_specs[job_spec_id] = spec
     return spec

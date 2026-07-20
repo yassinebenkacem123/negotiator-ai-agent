@@ -39,7 +39,7 @@ class WebhookVerifier(Protocol):
     def verify(self, raw_body: bytes, signature: str | None) -> dict[str, Any]: ...
 
 
-class InMemoryVoiceRepository:
+class DatabaseVoiceRepository:
     def get_job_spec(self, job_spec_id: str) -> JobSpec | None:
         return job_specs.get(job_spec_id)
 
@@ -72,10 +72,7 @@ class InMemoryVoiceRepository:
         call_artifacts[artifact.call_id] = artifact
 
     def claim_webhook_event(self, event_key: str) -> bool:
-        if event_key in processed_webhook_events:
-            return False
-        processed_webhook_events.add(event_key)
-        return True
+        return processed_webhook_events.claim(event_key)
 
     def release_webhook_event(self, event_key: str) -> None:
         processed_webhook_events.discard(event_key)
@@ -116,13 +113,14 @@ class StoreCompletedCallSink:
             recording_url=quote_input.recording_url,
             red_flag=None,
         )
-        existing = quotes.setdefault(job_spec_id, [])
+        existing = quotes.get(job_spec_id, [])
         for index, stored in enumerate(existing):
             if stored.call_id == quote.call_id:
                 existing[index] = quote
                 break
         else:
             existing.append(quote)
+        quotes[job_spec_id] = existing
 
         artifact = self._repository.get_artifact(quote_input.call_id)
         upsert_completed_call(
@@ -134,14 +132,16 @@ class StoreCompletedCallSink:
         )
 
         state = "completed" if quote.outcome == "quote" else quote.outcome
-        call_states.setdefault(job_spec_id, {})[quote.company_id] = {
-            **call_states.setdefault(job_spec_id, {}).get(quote.company_id, {}),
+        job_call_states = call_states.get(job_spec_id, {})
+        job_call_states[quote.company_id] = {
+            **job_call_states.get(quote.company_id, {}),
             "state": state,
             "outcome": quote.outcome,
             "call_id": quote.call_id,
             "transcript_url": quote.transcript_url,
             "recording_url": quote.recording_url,
         }
+        call_states[job_spec_id] = job_call_states
 
         from app.api.results import broadcast_report_update
 
@@ -149,7 +149,7 @@ class StoreCompletedCallSink:
 
 
 def get_voice_repository() -> VoiceRepository:
-    return InMemoryVoiceRepository()
+    return DatabaseVoiceRepository()
 
 
 def get_completed_call_sink() -> CompletedCallSink:

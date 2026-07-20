@@ -6,6 +6,7 @@ elevenlabs
 twilio
 openai
 pydantic-settings
+psycopg[binary]
 python-multipart
 pymupdf
 pytest

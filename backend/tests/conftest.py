@@ -1,5 +1,11 @@
+import os
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
+
+# Never let automated tests read or mutate the live Neon database from .env.
+_TEST_DATABASE_PATH = Path(__file__).parent / f".test-negotiator-{os.getpid()}.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DATABASE_PATH.as_posix()}"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +20,12 @@ from app.main import app
 from app.models.job_spec import JobSpec
 from app.models.lead import Lead
 from app.models.voice import P3QuoteInput, StoredCallArtifact
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_test_database() -> Iterator[None]:
+    yield
+    _TEST_DATABASE_PATH.unlink(missing_ok=True)
 
 
 def make_spec(**overrides: Any) -> JobSpec:

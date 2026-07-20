@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.api import calls, results, search, specs
 from app.config import settings
-from app.database import initialize_database
+from app.database import check_database_connection, initialize_database
 from app.services.stream_handler import handle_media_stream
 
 app = FastAPI(title="The Negotiator — Residential Moving Backend")
@@ -99,4 +99,7 @@ async def twiml(
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "database": check_database_connection(),
+    }

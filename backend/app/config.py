@@ -30,7 +30,7 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:8080,http://127.0.0.1:8080"
     )
-    database_url: str = "sqlite:///./data/negotiator.db"
+    database_url: str = ""
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = Field(
