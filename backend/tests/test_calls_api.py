@@ -126,10 +126,10 @@ def test_start_test_call_skips_discovery_and_persists_initiated_call(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    spec = make_spec(job_spec_id="spec_test_outbound")
-    job_specs[spec.job_spec_id] = spec
     previous_database = settings.database_url
     settings.database_url = f"sqlite:///{(tmp_path / 'calls.db').as_posix()}"
+    spec = make_spec(job_spec_id="spec_test_outbound")
+    job_specs[spec.job_spec_id] = spec
     captured: dict[str, str] = {}
 
     def fake_initiate_call(lead, stream_webhook_url: str) -> str:
@@ -142,10 +142,10 @@ def test_start_test_call_skips_discovery_and_persists_initiated_call(
         response = api_client.post(f"/api/calls/start-test/{spec.job_spec_id}")
         stored = get_call("CA_TEST_123")
     finally:
-        settings.database_url = previous_database
         job_specs.pop(spec.job_spec_id, None)
         leads.pop(spec.job_spec_id, None)
         call_states.pop(spec.job_spec_id, None)
+        settings.database_url = previous_database
 
     assert response.status_code == 200
     payload = response.json()

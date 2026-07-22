@@ -4,6 +4,7 @@ delegate conversation setup to voice_service.py. No calling/negotiation
 logic lives in this file.
 """
 
+import logging
 from urllib.parse import quote
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ from app.clients.eleven_client import (
     ElevenLabsError,
     InvalidWebhookSignatureError,
 )
+from app.clients.twilio_client import TwilioConfigurationError
 from app.config import settings
 from app.database import get_call, list_calls, upsert_completed_call, upsert_started_call
 from app.models.lead import Lead
@@ -47,6 +49,7 @@ from app.services.webhook_service import InvalidWebhookPayloadError, WebhookProc
 from app.store import call_states, job_specs, leads, quotes
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -91,6 +94,15 @@ def _test_company() -> Lead:
     )
 
 
+def _public_backend_base_url(request: Request | None = None) -> str:
+    configured = settings.backend_public_url.strip().rstrip("/")
+    if configured:
+        return configured
+    if request is not None:
+        return str(request.base_url).rstrip("/")
+    raise HTTPException(status_code=503, detail="BACKEND_PUBLIC_URL is required")
+
+
 def _prepare_test_call(job_spec_id: str, company: Lead) -> PreparedOutboundCall:
     spec = job_specs.get(job_spec_id)
     if not spec:
@@ -113,19 +125,19 @@ def _prepare_test_call(job_spec_id: str, company: Lead) -> PreparedOutboundCall:
 
 
 @router.post("/start-test/{job_spec_id}")
-def start_test_outbound_call(job_spec_id: str):
+def start_test_outbound_call(job_spec_id: str, request: Request):
     """Start the fixed-number E2E test without invoking Tavily or discovery."""
 
     company = _test_company()
     prepared = _prepare_test_call(job_spec_id, company)
     leads[job_spec_id] = [company]
     register_url = (
-        f"{settings.backend_public_url.rstrip('/')}/api/calls/elevenlabs-register/"
+        f"{_public_backend_base_url(request)}/api/calls/elevenlabs-register/"
         f"{quote(job_spec_id, safe='')}/{quote(company.company_id, safe='')}"
     )
     try:
         call_sid = telephony.initiate_call(company, register_url)
-    except Exception as exc:
+    except TwilioConfigurationError as exc:
         _set_call_state(
             job_spec_id,
             company.company_id,
@@ -133,7 +145,23 @@ def start_test_outbound_call(job_spec_id: str):
             outcome="no_answer",
             failure_message=str(exc),
         )
-        raise HTTPException(status_code=502, detail="Twilio call initiation failed") from exc
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Twilio call initiation failed for job_spec_id=%s", job_spec_id)
+        _set_call_state(
+            job_spec_id,
+            company.company_id,
+            state="failed",
+            outcome="no_answer",
+            failure_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Twilio call initiation failed. Check TWILIO_ACCOUNT_SID, "
+                "TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, and the verified test phone number."
+            ),
+        ) from exc
 
     started_at = _now_iso()
     _set_call_state(

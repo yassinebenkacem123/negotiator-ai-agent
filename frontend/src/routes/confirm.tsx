@@ -47,10 +47,18 @@ function friendlyError(message: string) {
   if (message.includes("Failed to fetch") || message.includes("NetworkError")) {
     return "Could not reach the backend. Check that the frontend API URL is current.";
   }
+  if (message.includes("TWILIO") || message.includes("Twilio call initiation failed")) {
+    return message;
+  }
+  if (message.includes("ELEVENLABS")) {
+    return message;
+  }
+  if (message.includes("BACKEND_PUBLIC_URL")) return message;
   if (message.includes("422")) return "Some required move details are missing or invalid. Please review the form.";
   if (message.includes("400")) return "The backend rejected this step. Please review the draft before confirming.";
   if (message.includes("404")) return "The saved draft could not be found. Please create the draft again.";
   if (message.includes("503")) return "A required service is not configured yet.";
+  if (message.includes("502")) return "The call provider could not start the outbound call. Check Twilio and ElevenLabs setup.";
   return "Something went wrong. Please try again.";
 }
 

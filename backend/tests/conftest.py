@@ -1,4 +1,6 @@
 import os
+import gc
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,15 @@ from app.models.voice import P3QuoteInput, StoredCallArtifact
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_test_database() -> Iterator[None]:
     yield
-    _TEST_DATABASE_PATH.unlink(missing_ok=True)
+    for attempt in range(5):
+        gc.collect()
+        try:
+            _TEST_DATABASE_PATH.unlink(missing_ok=True)
+            break
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.1)
 
 
 def make_spec(**overrides: Any) -> JobSpec:
