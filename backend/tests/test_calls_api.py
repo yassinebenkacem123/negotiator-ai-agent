@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from twilio.base.exceptions import TwilioRestException
 
 from app.clients.eleven_client import (
     ElevenLabsAuthenticationError,
@@ -170,6 +171,39 @@ def test_start_test_call_rejects_unconfirmed_spec(
     finally:
         job_specs.pop(spec.job_spec_id, None)
     assert response.status_code == 400
+
+
+def test_start_test_call_returns_twilio_error_detail(
+    api_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    previous_database = settings.database_url
+    settings.database_url = f"sqlite:///{(tmp_path / 'twilio-error.db').as_posix()}"
+    spec = make_spec(job_spec_id="spec_twilio_error")
+    job_specs[spec.job_spec_id] = spec
+
+    def fake_initiate_call(_lead, _stream_webhook_url: str) -> str:
+        raise TwilioRestException(
+            status=400,
+            uri="/2010-04-01/Accounts/ACxxx/Calls.json",
+            msg="The destination phone number is not verified.",
+            code=21219,
+        )
+
+    monkeypatch.setattr(telephony, "initiate_call", fake_initiate_call)
+    try:
+        response = api_client.post(f"/api/calls/start-test/{spec.job_spec_id}")
+    finally:
+        job_specs.pop(spec.job_spec_id, None)
+        leads.pop(spec.job_spec_id, None)
+        call_states.pop(spec.job_spec_id, None)
+        settings.database_url = previous_database
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "Twilio error 21219: The destination phone number is not verified."
+    )
 
 
 def test_call_statuses_return_backend_states(api_client: TestClient) -> None:

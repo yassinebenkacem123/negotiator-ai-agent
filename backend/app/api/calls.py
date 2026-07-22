@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import ValidationError
+from twilio.base.exceptions import TwilioRestException
 
 from app.api.results import broadcast_report_update
 from app.api.voice_errors import as_http_exception
@@ -103,6 +104,12 @@ def _public_backend_base_url(request: Request | None = None) -> str:
     raise HTTPException(status_code=503, detail="BACKEND_PUBLIC_URL is required")
 
 
+def _twilio_error_detail(exc: TwilioRestException) -> str:
+    code = f" {exc.code}" if exc.code else ""
+    message = getattr(exc, "msg", None) or str(exc)
+    return f"Twilio error{code}: {message}"
+
+
 def _prepare_test_call(job_spec_id: str, company: Lead) -> PreparedOutboundCall:
     spec = job_specs.get(job_spec_id)
     if not spec:
@@ -146,6 +153,23 @@ def start_test_outbound_call(job_spec_id: str, request: Request):
             failure_message=str(exc),
         )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except TwilioRestException as exc:
+        detail = _twilio_error_detail(exc)
+        logger.warning(
+            "Twilio rejected call initiation for job_spec_id=%s status=%s code=%s message=%s",
+            job_spec_id,
+            exc.status,
+            exc.code,
+            getattr(exc, "msg", None),
+        )
+        _set_call_state(
+            job_spec_id,
+            company.company_id,
+            state="failed",
+            outcome="no_answer",
+            failure_message=detail,
+        )
+        raise HTTPException(status_code=502, detail=detail) from exc
     except Exception as exc:
         logger.exception("Twilio call initiation failed for job_spec_id=%s", job_spec_id)
         _set_call_state(

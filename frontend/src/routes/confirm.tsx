@@ -47,7 +47,7 @@ function friendlyError(message: string) {
   if (message.includes("Failed to fetch") || message.includes("NetworkError")) {
     return "Could not reach the backend. Check that the frontend API URL is current.";
   }
-  if (message.includes("TWILIO") || message.includes("Twilio call initiation failed")) {
+  if (message.includes("TWILIO") || message.includes("Twilio")) {
     return message;
   }
   if (message.includes("ELEVENLABS")) {
