@@ -24,12 +24,9 @@ cors_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=settings.frontend_cors_origin_regex or None,
     allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-    allow_headers=[
-        "Accept",
-        "Content-Type",
-        "ngrok-skip-browser-warning",
-    ],
+    allow_headers=["*"],
 )
 
 app.include_router(specs.router)
